@@ -21,7 +21,7 @@
         ref="vuetable"
       >
         <template slot="ids" slot-scope="props">
-          <b-link @click="openRequest(props.rowData, props.rowIndex)">#{{props.rowData.id}}</b-link>
+          <b-link :href="openRequest(props.rowData, props.rowIndex)">#{{props.rowData.id}}</b-link>
         </template>
         <template slot="participants" slot-scope="props">
           <avatar-image
@@ -38,7 +38,7 @@
             <div class="popout">
               <b-btn
                 variant="link"
-                @click="onAction('edit-designer', props.rowData, props.rowIndex)"
+                :href="openRequest(props.rowData, props.rowIndex)"
                 v-b-tooltip.hover
                 :title="$t('Open Request')"
               >
@@ -71,7 +71,7 @@ Vue.component("avatar-image", AvatarImage);
 
 export default {
   mixins: [datatableMixin, dataLoadingMixin],
-  props: ["filter", "columns"],
+  props: ["filter", "columns", "pmql"],
   data() {
     return {
       orderBy: "id",
@@ -87,31 +87,6 @@ export default {
       fields: []
     };
   },
-  beforeCreate() {
-    let status = null;
-
-    switch (Processmaker.status) {
-      // if there is no status, meaning its on my requests, We should only show the in progress status
-      case "":
-        status = "In Progress";
-        this.$parent.requester.push(Processmaker.user);
-        break;
-      case "in_progress":
-        status = "In Progress";
-        break;
-      case "completed":
-        status = "Completed";
-        break;
-    }
-    if (status) {
-      this.$parent.status.push({
-        name: this.$t(status),
-        value: status
-      });
-    }
-
-    this.$parent.buildPmql();
-  },
   mounted() {
     this.setupColumns();
   },
@@ -121,7 +96,7 @@ export default {
       
       columns.forEach(column => {
         let field = {
-          title: this.$t(column.label)
+          title: () => this.$t(column.label)
         };
         
         switch (column.field) {
@@ -201,15 +176,8 @@ export default {
         ];
       }
     },
-    onAction(action, data, index) {
-      switch (action) {
-        case "edit-designer":
-          this.openRequest(data, index);
-          break;
-      }
-    },
     openRequest(data, index) {
-      window.location.href = "/requests/" + data.id;
+      return "/requests/" + data.id;
     },
     formatStatus(status) {
       let color = "success",
@@ -259,47 +227,55 @@ export default {
       return data;
     },
     fetch(query, resetPagination) {
-      if (resetPagination) {
-        this.page = 1;
-      }
-      
-      let pmql = this.$parent.pmql;
-      let filter = this.filter;
-      
-      if (query && query.length) {
-        if (query.isPMQL()) {
-          pmql = `(${pmql}) and (${query})`;
-        } else {
-          filter = query;
-        }
-      }
+        Vue.nextTick(() => {
+            if (resetPagination) {
+              this.page = 1;
+            }
+            
+            let pmql = '';
+            
+            if (this.pmql !== undefined) {
+                pmql = this.pmql;
+            }
+                    
+            let filter = this.filter;
+            
+            if (query && query.length) {
+              if (query.isPMQL()) {
+                pmql = `(${pmql}) and (${query})`;
+              } else {
+                filter = query;
+              }
+            }
 
-      // Load from our api client
-      ProcessMaker.apiClient
-        .get(
-          "requests?page=" +
-            this.page +
-            "&per_page=" +
-            this.perPage +
-            "&include=process,participants,data" +
-            "&pmql=" +
-            encodeURIComponent(pmql) +
-            "&filter=" +
-            filter +
-            "&order_by=" +
-            (this.orderBy === "__slot:ids" ? "id" : this.orderBy) +
-            "&order_direction=" +
-            this.orderDirection +
-            this.additionalParams
-        )
-        .then(response => {
-          this.data = this.transform(response.data);
-        }).catch(error => {
-          if (_.has(error, 'response.data.message')) {
-            ProcessMaker.alert(error.response.data.message, 'danger');
-          } else {
-            throw error;
-          }
+            // Load from our api client
+            ProcessMaker.apiClient
+              .get(
+                "requests?page=" +
+                  this.page +
+                  "&per_page=" +
+                  this.perPage +
+                  "&include=process,participants,data" +
+                  "&pmql=" +
+                  encodeURIComponent(pmql) +
+                  "&filter=" +
+                  filter +
+                  "&order_by=" +
+                  (this.orderBy === "__slot:ids" ? "id" : this.orderBy) +
+                  "&order_direction=" +
+                  this.orderDirection +
+                  this.additionalParams
+              )
+              .then(response => {
+                this.data = this.transform(response.data);
+              }).catch(error => {
+                if (_.has(error, 'response.data.message')) {
+                  ProcessMaker.alert(error.response.data.message, 'danger');
+                } else {
+                  throw error;
+                }
+              });
+            
         });
     }
   }

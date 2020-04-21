@@ -47,15 +47,17 @@ class TaskSchedulerManager implements JobManagerInterface, EventBusInterface
         ScheduledTask::where('process_id', $process->id)
             ->where('type', 'TIMER_START_EVENT')
             ->delete();
+        if (!$process->isValidForExecution()) {
+            return;
+        }
         $definitions = $process->getDefinitions();
         if ($definitions) {
-            $definitions->getEngine()->getJobManager()->enableRegisterStartEvents();
             $processDefinitions = $definitions->getElementsByTagNameNS(BpmnDocument::BPMN_MODEL, 'process');
             foreach ($processDefinitions as $processDefinition) {
                 $element = $processDefinition->getBpmnElementInstance();
                 $definitions->getEngine()->loadProcess($element);
+                $definitions->getEngine()->registerStartTimerEvents($element);
             }
-            $definitions->getEngine()->getJobManager()->disableRegisterStartEvents();
         }
     }
 
@@ -101,7 +103,7 @@ class TaskSchedulerManager implements JobManagerInterface, EventBusInterface
             'element_id' => $element->getId(),
         ];
         $scheduledTask = new ScheduledTask();
-        $process = $element->getOwnerProcess()->getEngine()->getProcess();
+        $process = $element->getOwnerProcess()->getOwnerDocument()->getModel();
         $scheduledTask->process_id = $token ? $token->process_id : $process->id;
         $scheduledTask->process_request_id = $token ? $token->processRequest->id : null;
         $scheduledTask->process_request_token_id = $token ? $token->id : null;
@@ -117,9 +119,8 @@ class TaskSchedulerManager implements JobManagerInterface, EventBusInterface
     /**
      * Checks the schedule_tasks table to execute jobs
      *
-     * @param Schedule $schedule
      */
-    public function scheduleTasks(Schedule $schedule)
+    public function scheduleTasks()
     {
         $today = $this->today();
         try {
@@ -221,6 +222,10 @@ class TaskSchedulerManager implements JobManagerInterface, EventBusInterface
         }
 
         $process = Process::find($id);
+
+        if (!$process->isValidForExecution()) {
+            return;
+        }
 
         // If a process is configured to pause timer start events we do nothing
         if ($process->pause_timer_start === 1) {

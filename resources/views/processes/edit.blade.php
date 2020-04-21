@@ -28,11 +28,13 @@
                         <a class="nav-item nav-link" id="nav-groups-tab" data-toggle="tab" href="#nav-notifications"
                            role="tab"
                            aria-controls="nav-notifications" aria-selected="true">{{__('Notifications')}}</a>
-                        @foreach ($addons as $addon)
-                            <a class="nav-item nav-link" id="{{$addon['id'] . '-tab'}}" data-toggle="tab"
-                               href="{{'#' . $addon['id']}}" role="tab"
-                               aria-controls="nav-notifications" aria-selected="true">{{ __($addon['title']) }}</a>
-                        @endforeach
+                        @isset($addons)
+                            @foreach ($addons as $addon)
+                                <a class="nav-item nav-link" id="{{$addon['id'] . '-tab'}}" data-toggle="tab"
+                                   href="{{'#' . $addon['id']}}" role="tab"
+                                   aria-controls="nav-notifications" aria-selected="true">{{ __($addon['title']) }}</a>
+                            @endforeach
+                        @endisset
                     </div>
                 </nav>
                 <div class="card card-body card-body-nav-tabs">
@@ -40,7 +42,7 @@
                         <div class="tab-pane fade show active" id="nav-config" role="tabpanel"
                              aria-labelledby="nav-config-tab">
                             <div class="form-group">
-                                {!!Form::label('processTitle', __('Name'))!!}
+                                {!!Form::label('processTitle', __('Name') . '<small class="ml-1">*</small>', [], false)!!}
                                 {!!Form::text('processTitle', null,
                                     [ 'id'=> 'name',
                                         'class'=> 'form-control',
@@ -53,7 +55,7 @@
                                 <div class="invalid-feedback" v-if="errors.processTitle">@{{errors.name[0]}}</div>
                             </div>
                             <div class="form-group">
-                                {!! Form::label('description', __('Description')) !!}
+                                {!! Form::label('description', __('Description')  . '<small class="ml-1">*</small>', [], false) !!}
                                 {!! Form::textarea('description', null,
                                     ['id' => 'description',
                                         'rows' => 4,
@@ -222,12 +224,14 @@
                                 {!! Form::button(__('Save'), ['class'=>'btn btn-secondary ml-2', '@click' => 'onUpdate']) !!}
                             </div>
                         </div>
-                        @foreach ($addons as $addon)
-                            <div class="tab-pane fade show" id="{{$addon['id']}}" role="tabpanel"
-                                 aria-labelledby="nav-notifications-tab">
-                                {!! $addon['content'] !!}
-                            </div>
-                        @endforeach
+                        @isset($addons)
+                            @foreach ($addons as $addon)
+                                <div class="tab-pane fade show" id="{{$addon['id']}}" role="tabpanel"
+                                     aria-labelledby="nav-notifications-tab">
+                                    {!! $addon['content'] !!}
+                                </div>
+                            @endforeach
+                        @endisset
                     </div>
                 </div>
 
@@ -239,14 +243,6 @@
 
 @section('js')
     <script src="{{mix('js/processes/edit.js')}}"></script>
-    <script>
-      var addons = [];
-    </script>
-    @foreach ($addons as $addon)
-        @if (!empty($addon['script']))
-            {!! $addon['script'] !!}
-        @endif
-    @endforeach
     <script>
       test = new Vue({
         el: '#editProcess',

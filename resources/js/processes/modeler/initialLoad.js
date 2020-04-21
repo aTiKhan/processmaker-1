@@ -17,7 +17,8 @@ import {
   messageFlow,
   serviceTask,
   callActivity,
-  eventBasedGateway
+  eventBasedGateway,
+  intermediateMessageCatchEvent
 } from '@processmaker/modeler';
 import ModelerScreenSelect from './components/inspector/ScreenSelect';
 import UserSelect from './components/inspector/UserSelect';
@@ -32,6 +33,7 @@ import ScriptSelect from './components/inspector/ScriptSelect';
 import StartPermission from './components/inspector/StartPermission';
 import {registerNodes} from "@processmaker/modeler";
 import Interstitial from "./components/inspector/Interstitial";
+import SelectUserGroup from "../../components/SelectUserGroup";
 
 Vue.component('UserSelect', UserSelect);
 Vue.component('UserById', UserById);
@@ -45,6 +47,7 @@ Vue.component('ConfigEditor', ConfigEditor);
 Vue.component('ScriptSelect', ScriptSelect);
 Vue.component('StartPermission', StartPermission);
 Vue.component("Interstitial", Interstitial);
+Vue.component("SelectUserGroup", SelectUserGroup);
 
 let nodeTypes = [
   endEvent,
@@ -63,18 +66,13 @@ let nodeTypes = [
   messageFlow,
   serviceTask,
   textAnnotation,
+  intermediateMessageCatchEvent,
+  eventBasedGateway,
 ];
 
 ProcessMaker.nodeTypes.push(startEvent);
 ProcessMaker.nodeTypes.push(...nodeTypes);
 
-// Set default properties for task
-task.definition = function definition(moddle) {
-  return moddle.create('bpmn:Task', {
-    name: window.ProcessMaker.events.$t('New Task'),
-    assignment: 'requester'
-  });
-};
 ProcessMaker.EventBus.$on('modeler-init', registerNodes);
 
 ProcessMaker.EventBus.$on(
@@ -88,7 +86,7 @@ ProcessMaker.EventBus.$on(
         initiallyOpen: false,
         label: 'Start Permissions',
         icon: 'user-shield',
-        name: 'inspector-accordion',
+        name: 'permissions-accordion',
       },
       items: [
         {
@@ -103,6 +101,14 @@ ProcessMaker.EventBus.$on(
         },
       ],
     });
+    registerInspectorExtension(startEvent, {
+      component: "Interstitial",
+      config: {
+        label: "Display Next Assigned Task to Task Assignee",
+        helper: "Directs Task assignee to the next assigned Task",
+        name: "interstitial"
+      }
+    });
 
     /* Register the inspector extensions for tasks */
     registerInspectorExtension(task, {
@@ -111,6 +117,7 @@ ProcessMaker.EventBus.$on(
         label: 'Screen for Input',
         helper: 'Select Screen to display this Task',
         name: 'screenRef',
+        required: true,
         type: 'FORM'
       }
     });
@@ -129,7 +136,7 @@ ProcessMaker.EventBus.$on(
         initiallyOpen: false,
         label: 'Assignment Rules',
         icon: 'users',
-        name: 'inspector-accordion',
+        name: 'assignments-accordion',
       },
       items: [
         {
@@ -149,7 +156,7 @@ ProcessMaker.EventBus.$on(
         initiallyOpen: false,
         label: 'Notifications',
         icon: 'bell',
-        name: 'inspector-accordion',
+        name: 'notifications-accordion',
       },
       items: [
         {
@@ -176,7 +183,8 @@ ProcessMaker.EventBus.$on(
       config: {
         label: 'Script',
         helper: 'Select the Script this element runs',
-        name: 'scriptRef'
+        name: 'scriptRef',
+        required: true,
       }
     });
 
@@ -206,7 +214,8 @@ ProcessMaker.EventBus.$on(
         helper:
           'Select Screen to display this Task',
         name: 'screenRef',
-        params: { type: 'DISPLAY' }
+        params: { type: 'DISPLAY' },
+        required: true,
       }
     });
     registerInspectorExtension(manualTask, {
@@ -224,7 +233,7 @@ ProcessMaker.EventBus.$on(
         initiallyOpen: false,
         label: 'Assignment Rules',
         icon: 'users',
-        name: 'inspector-accordion',
+        name: 'assignments-accordion',
       },
       items: [
         {
@@ -244,7 +253,7 @@ ProcessMaker.EventBus.$on(
         initiallyOpen: false,
         label: 'Notifications',
         icon: 'bell',
-        name: 'inspector-accordion',
+        name: 'notifications-accordion',
       },
       items: [
         {
@@ -262,6 +271,34 @@ ProcessMaker.EventBus.$on(
         helper: "redirected to my next assigned task",
         name: "interstitial"
       }
+    });
+
+    /* Register extension for intermediate message catch event */
+    registerInspectorExtension(intermediateMessageCatchEvent, {
+      component: 'UserSelect',
+      config: {
+        label: 'Allowed User',
+        helper: 'Select allowed user',
+        name: 'allowedUsers'
+      }
+    });
+
+    registerInspectorExtension(intermediateMessageCatchEvent, {
+      component: 'GroupSelect',
+      config: {
+        label: 'Allowed Group',
+        helper: 'Select allowed group',
+        name: 'allowedGroups'
+      }
+    });
+
+    registerInspectorExtension(intermediateMessageCatchEvent, {
+      component: 'FormInput',
+      config: {
+          label: 'Whitelist',
+          helper: 'IP/Domain whitelist',
+          name: 'whitelist',
+      },
     });
   }
 );

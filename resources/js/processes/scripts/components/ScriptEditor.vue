@@ -1,12 +1,7 @@
 <template>
   <b-container class="h-100">
     <b-card no-body class="h-100">
-      <b-card-header class="text-right">
-        <b-button title="Save Script" @click="save" size="sm">
-          <i class="fas fa-save" />
-          {{ $t('Save') }}
-        </b-button>
-      </b-card-header>
+      <top-menu ref="menuScript" :options="optionsMenu"/>
 
       <b-card-body class="overflow-hidden p-4">
         <b-row class="h-100">
@@ -14,7 +9,7 @@
             <monaco-editor
               :options="monacoOptions"
               v-model="code"
-              :language="script.language"
+              :language="language"
               class="h-100"
               :class="{hidden: resizing}"
             />
@@ -124,7 +119,7 @@
       <b-card-footer class="d-flex">
         <span class="text-secondary text-sm">
           Language:
-          <span class="text-uppercase">{{ script.language }}</span>
+          <span class="text-uppercase">{{ language }}</span>
         </span>
         <span class="ml-auto">
           <i v-if="preview.executing" class="fas fa-spinner fa-spin"></i>
@@ -140,17 +135,37 @@
 import MonacoEditor from "vue-monaco";
 import _ from "lodash";
 import customFilters from "../customFilters";
+import TopMenu from "../../../components/Menu";
 
 export default {
-  props: ["process", "script", "scriptFormat", "testData"],
+  props: ["process", "script", "scriptExecutor", "testData"],
   data() {
+    const options = [
+      {
+        id: "button_script_save",
+        section: "right",
+        type: "button",
+        title: this.$t("Save Script"),
+        name: this.$t("Save"),
+        icon: "fas fa-save",
+        action: () => {
+          ProcessMaker.EventBus.$emit("save-script");
+        }
+      }
+    ];
+
     return {
+      executionKey: null,
       resizing: false,
       monacoOptions: {
         automaticLayout: true
       },
       code: this.script.code,
       preview: {
+        error: {
+          exception: '',
+          message: ''
+        },
         executing: false,
         data: this.testData ? this.testData : "{}",
         config: "{}",
@@ -159,7 +174,8 @@ export default {
         failure: false
       },
       outputOpen: true,
-      boilerPlateTemplate: this.$t(` \r Welcome to ProcessMaker 4 Script Editor \r To access Environment Variables use get_env("ENV_VAR_NAME") \r To access Request Data use {dataVariable} \r To access Configuration Data use {configVariable} \r To preview your script, click the Run button using the provided input and config data \r Return an array and it will be merged with the processes data \r Example API to retrieve user email by their ID {apiExample} \r `),
+      optionsMenu: options,
+      boilerPlateTemplate: this.$t(` \r Welcome to ProcessMaker 4 Script Editor \r To access Environment Variables use {accessEnvVar} \r To access Request Data use {dataVariable} \r To access Configuration Data use {configVariable} \r To preview your script, click the Run button using the provided input and config data \r Return an array and it will be merged with the processes data \r Example API to retrieve user email by their ID {apiExample} \r API Documentation {apiDocsUrl} \r `),
     };
   },
   watch: {
@@ -170,9 +186,20 @@ export default {
     }
   },
   components: {
-    MonacoEditor
+    MonacoEditor,
+    TopMenu,
+  },
+  computed: {
+    language() {
+      return this.scriptExecutor.language;
+    }
   },
   mounted() {
+    ProcessMaker.EventBus.$emit("script-builder-init", this);
+    ProcessMaker.EventBus.$on("save-script", (onSuccess, onError) => {
+      this.save(onSuccess, onError);
+    });
+
     window.addEventListener("resize", this.handleResize);
     let userID = document.head.querySelector('meta[name="user-id"]');
     window.Echo.private(
@@ -188,15 +215,27 @@ export default {
 
   methods: {
     outputResponse(response) {
-      this.preview.output = response.response;
+      if (this.executionKey && this.executionKey !== response.data.watcher) {
+        return;
+      }
+      ProcessMaker.apiClient.get("scripts/execution/" + response.response.key).then((response) => {
+        if (response.data.exception) {
+          this.preview.executing = false;
+          this.preview.failure = true;
+          this.preview.error.exception = response.data.exception;
+          this.preview.error.message = response.data.message;
+        } else {
+          this.preview.executing = false;
+          this.preview.success = true;
+          this.preview.output = response.data;
+        }
+      });
 
-      if (response.status === 200) {
-        this.preview.executing = false;
-        this.preview.success = true;
-      } else {
+      if (response.status !== 200) {
         this.preview.executing = false;
         this.preview.failure = true;
-        this.preview.error = response.response;
+        this.preview.error.exception = response.status;
+        this.preview.error.message = response.response;
       }
     },
     stopResizing: _.debounce(function() {
@@ -214,28 +253,36 @@ export default {
       // Attempt to execute a script, using our temp variables
       ProcessMaker.apiClient.post("scripts/" + this.script.id + "/preview", {
         code: this.code,
-        language: this.script.language,
         data: this.preview.data,
         config: this.preview.config,
         timeout: this.script.timeout
+      }).then((response) => {
+        this.executionKey = response.data.key;
       });
     },
     onClose() {
       window.location.href = "/designer/scripts";
     },
-    save() {
+    save(onSuccess, onError) {
       ProcessMaker.apiClient
         .put("scripts/" + this.script.id, {
           code: this.code,
           title: this.script.title,
           description: this.script.description,
-          language: this.script.language,
+          script_executor_id: this.script.script_executor_id,
           run_as_user_id: this.script.run_as_user_id,
           timeout: this.script.timeout,
           description: this.script.description
         })
         .then(response => {
           ProcessMaker.alert(this.$t("The script was saved."), "success");
+          if (typeof onSuccess === "function") {
+            onSuccess(response);
+          }
+        }).catch(err => {
+          if (typeof onError === "function") {
+            onError(err);
+          }
         });
     },
     loadBoilerplateTemplate() {
@@ -255,6 +302,9 @@ export default {
           break;
         case 'java':
           this.code = Vue.filter('java')(this.boilerPlateTemplate);
+          break;
+        case 'python':
+          this.code = Vue.filter('python')(this.boilerPlateTemplate);
           break;
         }
 

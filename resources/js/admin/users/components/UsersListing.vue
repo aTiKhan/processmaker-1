@@ -1,11 +1,11 @@
 <template>
   <div class="data-table">
     <data-loading
-            :for="/users\?page/"
-            v-show="shouldShowLoader"
-            :empty="$t('No Data Available')"
-            :empty-desc="$t('')"
-            empty-icon="noData"
+      :for="/users\?page/"
+      v-show="shouldShowLoader"
+      :empty="$t('No Data Available')"
+      :empty-desc="$t('')"
+      empty-icon="noData"
     />
     <div v-show="!shouldShowLoader"  class="card card-body table-card">
       <vuetable
@@ -72,16 +72,23 @@ export default {
   props: ["filter", "permission"],
   data() {
     return {
+      localLoadOnStart: true,
       orderBy: "username",
+      data: [],
       // Our listing of users
       sortOrder: [
         {
           field: "username",
           sortField: "username",
           direction: "asc"
-        }
+        },
       ],
       fields: [
+        {
+          title: () => this.$t("ID"),
+          name: "id",
+          sortField: "id"
+        },
         {
           title: () => this.$t("Username"),
           name: "username",
@@ -128,6 +135,14 @@ export default {
       ]
     };
   },
+  created() {
+      ProcessMaker.EventBus.$on("api-data-users", (val) => {
+        this.localLoadOnStart = val;
+        this.fetch();
+        this.apiDataLoading = false;
+        this.apiNoResults = false;
+      });
+  },
   methods: {
     formatStatus(status) {
       status = status.toLowerCase();
@@ -169,7 +184,7 @@ export default {
                     this.$t("The user was deleted."),
                     "danger"
                   );
-                  this.$emit("reload");
+                  ProcessMaker.EventBus.$emit("api-data-users", true);
                 });
             }
           );
@@ -177,6 +192,10 @@ export default {
       }
     },
     fetch() {
+      if (!this.localLoadOnStart) {
+        //this.data = [];
+        return;
+      }
       this.loading = true;
       //change method sort by user
       this.orderBy = this.orderBy === "fullname" ? "firstname" : this.orderBy;

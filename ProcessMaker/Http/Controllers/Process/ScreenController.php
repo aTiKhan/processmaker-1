@@ -11,16 +11,19 @@ use ProcessMaker\Http\Controllers\Controller;
 use ProcessMaker\Models\Screen;
 use ProcessMaker\Models\ScreenCategory;
 use ProcessMaker\Models\ScreenType;
+use ProcessMaker\Traits\HasControllerAddons;
 
 class ScreenController extends Controller
 {
+    use HasControllerAddons;
+
     /**
      * Get the list of screens
      *
      * @param Request $request
      * @return Factory|View
      */
-    public function index()
+    public function index(Request $request)
     {
         $types = [];
         foreach(ScreenType::pluck('name')->toArray() as $type) {
@@ -38,6 +41,12 @@ class ScreenController extends Controller
             ],
             'countField' => 'screens_count',
             'apiListInclude' => 'screensCount',
+            'permissions' => [
+                'view'   => $request->user()->can('view-screen-categories'),
+                'create' => $request->user()->can('create-screen-categories'),
+                'edit'   => $request->user()->can('edit-screen-categories'),
+                'delete' => $request->user()->can('delete-screen-categories'),
+            ],
         ];
 
         $listConfig = (object) [
@@ -57,7 +66,8 @@ class ScreenController extends Controller
      */
     public function edit(Screen $screen)
     {
-        return view('processes.screens.edit', compact('screen'));
+        $addons = $this->getPluginAddons('edit', compact(['screen']));
+        return view('processes.screens.edit', compact('screen', 'addons'));
     }
 
     /**

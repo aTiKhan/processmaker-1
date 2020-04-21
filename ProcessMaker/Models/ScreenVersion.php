@@ -14,11 +14,6 @@ class ScreenVersion extends Model
     protected $connection = 'processmaker';
 
     /**
-     * Do not automatically set created_at
-     */
-    const CREATED_AT = null;
-
-    /**
      * Attributes that are not mass assignable.
      *
      * @var array $fillable
@@ -42,6 +37,16 @@ class ScreenVersion extends Model
     public function setScreenCategoryIdAttribute($value)
     {
         return $this->setMultipleCategories($value, 'screen_category_id');
+    }
+
+    /**
+     * Get the associated screen
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     */
+    public function parent()
+    {
+        return $this->belongsTo(Screen::class, 'screen_id', 'id');
     }
 
 }

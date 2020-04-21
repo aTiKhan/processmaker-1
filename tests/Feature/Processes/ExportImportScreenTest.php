@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Http\UploadedFile;
 use ProcessMaker\Models\Process;
 use ProcessMaker\Models\Screen;
+use ProcessMaker\Models\ScriptExecutor;
 use ProcessMaker\Models\User;
 use Tests\Feature\Shared\RequestHelper;
 use Tests\TestCase;
@@ -15,6 +16,11 @@ class ExportImportScreenTest extends TestCase
     use RequestHelper;
 
     public $withPermissions = true;
+
+    protected function setUpExecutor()
+    {
+        ScriptExecutor::setTestConfig('php');
+    }
 
     /**
      * Test to ensure we can export and import
@@ -128,5 +134,23 @@ class ExportImportScreenTest extends TestCase
         $response->assertStatus(200);
         //Unable to import the screen.
         $this->assertFalse($response->json('status'));
+    }
+
+    public function testImportScreenWithWatchers()
+    {
+        // Load the file to test
+        $fileName = __DIR__ . '/../../Fixtures/screen_with_watchers.json';
+
+        $file = new UploadedFile($fileName, 'screen_with_watchers.json', null, null, null, true);
+
+        // Test to ensure our admin user can import a other file
+        //$this->user = $adminUser;
+        $response = $this->apiCall('POST', '/screens/import', [
+            'file' => $file,
+        ]);
+        $response->assertStatus(200);
+
+        //Unable to import the screen.
+        $this->assertFalse($response->json('status')['screens']['success']);
     }
 }

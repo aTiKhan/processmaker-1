@@ -57,30 +57,39 @@ trait ProcessTaskAssignmentsTrait
      */
     private static function setAssignments(DOMElement $node, array $assignments)
     {
+
         $assignment = $node->getAttributeNS(PM::PROCESS_MAKER_NS, 'assignment');
-        if ($assignment === 'user') {
+        if ($assignment === 'user' || $assignment === 'group' || $assignment === 'user_group' || $assignment === 'self_service') {
+
             $users = explode(',',
                 $node->getAttributeNS(PM::PROCESS_MAKER_NS, 'assignedUsers'));
-            if (empty($users[0])) {
-                throw new TaskDoesNotHaveUsersException($node->getAttribute('id'));
+            if ($users) {
+                foreach ($users as $user) {
+                    if (!empty($user)) {
+                        $assignments[] = [
+                            'process_task_id' => $node->getAttribute('id'),
+                            'assignment_id' => $user,
+                            'assignment_type' => User::class,
+                        ];
+                    }
+                }
             }
-            $assignments[] = [
-                'process_task_id' => $node->getAttribute('id'),
-                'assignment_id' => $users[0],
-                'assignment_type' => User::class,
-            ];
 
-        } elseif ($assignment === 'group' || $assignment === 'self_service') {
-            $group = $node->getAttributeNS(PM::PROCESS_MAKER_NS, 'assignedGroups');
-            if (empty($group)) {
-                throw new TaskDoesNotHaveUsersException($node->getAttribute('id'));
+            $groups = explode(',',
+                $node->getAttributeNS(PM::PROCESS_MAKER_NS, 'assignedGroups'));
+            if ($groups) {
+                foreach ($groups as $group) {
+                    if (!empty($group)) {
+                        $assignments[] = [
+                            'process_task_id' => $node->getAttribute('id'),
+                            'assignment_id' => $group,
+                            'assignment_type' => Group::class,
+                        ];
+                    }
+                }
             }
-            $assignments[] = [
-                'process_task_id' => $node->getAttribute('id'),
-                'assignment_id' => $group,
-                'assignment_type' => Group::class,
-            ];
         }
+
         return $assignments;
     }
 }

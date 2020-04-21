@@ -229,7 +229,7 @@ class ProcessRequestToken extends Model implements TokenInterface
      */
     public function assignableUsers()
     {
-        $query = $this->newQuery();
+        $query = $this->newQuery()->where('id', $this->getKey());
         return new TokenAssignableUsers($query, $this);
     }
 
@@ -240,7 +240,8 @@ class ProcessRequestToken extends Model implements TokenInterface
      */
     public function getDefinition($asObject = false)
     {
-        $definitions = $this->processRequest->process->getDefinitions();
+        $process = $this->processRequest->processVersion ?: $this->processRequest->process;
+        $definitions = $process->getDefinitions();
         $element = $definitions->findElementById($this->element_id);
         if (!$element) {
             return [];
@@ -312,6 +313,11 @@ class ProcessRequestToken extends Model implements TokenInterface
 
         if ($this->status === 'CLOSED') {
             $result = 'completed';
+        }
+
+        if ($this->status === 'TRIGGERED') {
+            $result = 'triggered';
+
         }
 
         return $result;
@@ -445,7 +451,7 @@ class ProcessRequestToken extends Model implements TokenInterface
     public function valueAliasRequest($value, $expression)
     {
         return function($query) use($expression, $value) {
-            $processRequests = ProcessRequest::where('name', $value)->get();
+            $processRequests = ProcessRequest::where('name', $expression->operator, $value)->get();
             $query->whereIn('process_request_tokens.process_request_id', $processRequests->pluck('id'));
         };
     }
@@ -461,7 +467,7 @@ class ProcessRequestToken extends Model implements TokenInterface
     public function valueAliasTask($value, $expression)
     {
         return function($query) use($expression, $value) {
-            $query->where('process_request_tokens.element_name', $value);
+            $query->where('process_request_tokens.element_name', $expression->operator, $value);
         };
     }
     

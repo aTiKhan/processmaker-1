@@ -2,11 +2,14 @@
 namespace ProcessMaker\Http\Controllers\Auth;
 
 use Illuminate\Http\Request;
-use Illuminate\Foundation\Auth\AuthenticatesUsers;
+use ProcessMaker\Models\User;
 use ProcessMaker\Http\Controllers\Controller;
+use Illuminate\Foundation\Auth\AuthenticatesUsers;
+use ProcessMaker\Traits\HasControllerAddons;
 
 class LoginController extends Controller
 {
+    use HasControllerAddons;
     /*
     |--------------------------------------------------------------------------
     | Login Controller
@@ -52,6 +55,21 @@ class LoginController extends Controller
             // Getting intended deletes it, so put in back
             $request->session()->put('url.intended', $intended);
         }
+        
+        // Check the status of the user
+        $user = User::where('username', $request->input('username'))->firstOrFail();
+        if ($user->status === 'INACTIVE') {
+            return redirect()->back();
+        }
+
+        $addons = $this->getPluginAddons('command', []);
+        foreach($addons as $addon) {
+            if(array_key_exists('command', $addon)) {
+                $command = $addon['command'];
+                $command->execute($request, $request->input('username'));
+            }
+        }
+
         return $this->login($request);
     }
 

@@ -2,12 +2,15 @@
 
 namespace ProcessMaker;
 
-use ProcessMaker\Models\Process;
 use ProcessMaker\Models\ProcessRequest;
+use ProcessMaker\Nayra\Contracts\Bpmn\ProcessInterface;
+use ProcessMaker\Nayra\Contracts\Bpmn\StartEventInterface;
+use ProcessMaker\Nayra\Contracts\Bpmn\TimerEventDefinitionInterface;
 use ProcessMaker\Nayra\Contracts\Engine\EngineInterface;
 use ProcessMaker\Nayra\Contracts\EventBusInterface;
 use ProcessMaker\Nayra\Contracts\RepositoryInterface;
 use ProcessMaker\Nayra\Engine\EngineTrait;
+use ProcessMaker\Repositories\BpmnDocument;
 
 /**
  * Test implementation for EngineInterface.
@@ -29,11 +32,10 @@ class BpmnEngine implements EngineInterface
     private $dispatcher;
 
     /**
-     * Process definition row.
-     *
-     * @var \ProcessMaker\Model\Process 
+     * Loaded versioned definitions
      */
-    private $process;
+    private $definitions = [];
+    public $uid;
 
     /**
      * Test engine constructor.
@@ -43,6 +45,7 @@ class BpmnEngine implements EngineInterface
      */
     public function __construct(RepositoryInterface $repository, $dispatcher)
     {
+        $this->uid = uniqid();
         $this->repository = $repository;
         $this->dispatcher = $dispatcher;
     }
@@ -86,25 +89,6 @@ class BpmnEngine implements EngineInterface
     }
 
     /**
-     * @return Model\Process
-     */
-    public function getProcess()
-    {
-        return $this->process;
-    }
-
-    /**
-     * @param RepositoryInterface $repository
-     *
-     * @return $this
-     */
-    public function setProcess(Process $process)
-    {
-        $this->process = $process;
-        return $this;
-    }
-
-    /**
      * Load an execution instance from an external storage.
      *
      * @param ProcessRequest $instance
@@ -113,16 +97,61 @@ class BpmnEngine implements EngineInterface
      */
     public function loadProcessRequest(ProcessRequest $instance)
     {
-        // If exists return the already loaded instance by id 
-        foreach($this->executionInstances as $executionInstance) {
+        // If exists return the already loaded instance by id
+        foreach ($this->executionInstances as $executionInstance) {
             if ($executionInstance->getId() === $instance->getKey()) {
                 return $executionInstance;
             }
         }
-        $parentStorage = $this->getStorage();
-        $this->setStorage($instance->process->getDefinitions(false, $this));
-        $instance = $this->loadExecutionInstance($instance->getKey());
-        $this->setStorage($parentStorage);
+        $definitions = $this->getDefinition($instance->processVersion ?? $instance->process);
+        $instance = $this->loadExecutionInstance($instance->getKey(), $definitions);
         return $instance;
+    }
+
+    public function getDefinition($processVersion)
+    {
+        $key = $processVersion->getKey();
+        if (!isset($this->definitions[$key])) {
+            $this->definitions[$key] = $processVersion->getDefinitions(false, $this);
+        }
+        return $this->definitions[$key];
+    }
+
+    /**
+     * Load a process definitin to the engine
+     *
+     * @param BpmnDocument $definitions
+     * @return void
+     */
+    public function loadProcessDefinitions(BpmnDocument $definitions)
+    {
+        //Load the collaborations
+        $collaborations = $definitions->getElementsByTagNameNS(BpmnDocument::BPMN_MODEL, 'collaboration');
+        foreach ($collaborations as $collaboration) {
+            $this->loadCollaboration($collaboration->getBpmnElementInstance());
+        }
+        //Load the collaborations
+        $processes = $definitions->getElementsByTagNameNS(BpmnDocument::BPMN_MODEL, 'process');
+        foreach ($processes as $process) {
+            $this->loadProcess($process->getBpmnElementInstance());
+        }
+    }
+
+    public function registerStartTimerEvents(ProcessInterface $process)
+    {
+        $this->getJobManager()->enableRegisterStartEvents();
+        foreach ($process->getEvents() as $event) {
+            if ($event instanceof StartEventInterface) {
+                //$event->scheduleTimerEvents(null);
+                //$event->registerWithEngine($this);
+                foreach ($event->getEventDefinitions() as $eventDefinition) {
+                    if ($eventDefinition instanceof TimerEventDefinitionInterface) {
+                        $eventDefinition->scheduleTimerEvents($event->getOwnerProcess()->getEngine(), $event, null);
+                    }
+                }
+
+            }
+        }
+        $this->getJobManager()->disableRegisterStartEvents();
     }
 }

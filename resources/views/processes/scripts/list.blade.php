@@ -24,7 +24,7 @@
 
         <div class="container-fluid">
             <script-listing :filter="filter"
-                            :script-formats='@json($config->scriptFormats)'
+                            :script-executors='@json($config->scriptExecutors)'
                             :permission="{{ \Auth::user()->hasPermissionsFor('scripts') }}"
                             ref="listScript"
                             @delete="deleteScript">
@@ -45,7 +45,7 @@
                     @if ($config->countCategories !== 0)
                         <div class="modal-body">
                             <div class="form-group">
-                                {!!Form::label('title', __('Name'))!!}
+                                {!!Form::label('title', __('Name'))!!}<small class="ml-1">*</small>
                                 {!!Form::text('title', null, ['class'=> 'form-control', 'v-model'=> 'title', 'v-bind:class' =>
                                 '{\'form-control\':true, \'is-invalid\':addError.title}'])!!}
                                 <small class="form-text text-muted"
@@ -53,7 +53,7 @@
                                 <div class="invalid-feedback" v-for="title in addError.title">@{{title}}</div>
                             </div>
                             <div class="form-group">
-                                {!!Form::label('description', __('Description'))!!}
+                                {!!Form::label('description', __('Description'))!!}<small class="ml-1">*</small>
                                 {!!Form::textarea('description', null, ['rows'=>'2','class'=> 'form-control', 'v-model'=> 'description',
                                 'v-bind:class' => '{\'form-control\':true, \'is-invalid\':addError.description}'])!!}
                                 <div class="invalid-feedback" v-for="description in addError.description">
@@ -65,15 +65,15 @@
                                              :errors="addError.script_category_id">
                             </category-select>
                             <div class="form-group">
-                                {!!Form::label('language', __('Language'))!!}
-                                {!!Form::select('language', [''=>__('Select')] + $config->scriptFormats, null, ['class'=>
-                                'form-control', 'v-model'=> 'language', 'v-bind:class' => '{\'form-control\':true,
-                                \'is-invalid\':addError.language}']);!!}
-                                <div class="invalid-feedback" v-for="language in addError.language">@{{language}}</div>
+                                {!!Form::label('script_executor_id', __('Language'))!!}<small class="ml-1">*</small>
+                                {!!Form::select('script_executor_id', [''=>__('Select')] + $config->scriptExecutors, null, ['class'=>
+                                'form-control', 'v-model'=> 'script_executor_id', 'v-bind:class' => '{\'form-control\':true,
+                                \'is-invalid\':addError.script_executor_id}']);!!}
+                                <div class="invalid-feedback" v-for="error in addError.script_executor_id">@{{error}}</div>
                             </div>
 
                             <div class="form-group">
-                                <label class="typo__label">{{__('Run script as')}}</label>
+                                <label class="typo__label">{{__('Run script as')}}<small class="ml-1">*</small></label>
                                 <select-user v-model="selectedUser" :multiple="false"
                                              :class="{'is-invalid': addError.run_as_user_id}">
                                 </select-user>
@@ -130,6 +130,7 @@
             data: {
               title: '',
               language: '',
+              script_executor_id: null,
               description: '',
               script_category_id: '',
               code: '',
@@ -143,6 +144,7 @@
               onClose() {
                 this.title = '';
                 this.language = '';
+                this.script_executor_id = null;
                 this.description = '';
                 this.script_category_id = '';
                 this.code = '';
@@ -163,7 +165,7 @@
                 this.disabled = true;
                 ProcessMaker.apiClient.post("/scripts", {
                   title: this.title,
-                  language: this.language,
+                  script_executor_id: this.script_executor_id,
                   description: this.description,
                   script_category_id: this.script_category_id,
                   run_as_user_id: this.selectedUser ? this.selectedUser.id : null,

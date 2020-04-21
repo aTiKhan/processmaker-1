@@ -22,7 +22,7 @@
                 <nav>
                     <div class="nav nav-tabs" id="nav-tab" role="tablist">
                         <a class="nav-item nav-link active" id="nav-home-tab" data-toggle="tab" href="#nav-home"
-                           role="tab" aria-controls="nav-home" aria-selected="true">{{__('Group Details')}}</a>
+                           role="tab" aria-controls="nav-home" aria-selected="true">{{__('Group Details')}} </a>
                         <a class="nav-item nav-link" id="nav-profile-tab" data-toggle="tab" href="#nav-users" role="tab"
                            aria-controls="nav-profile" aria-selected="false">{{__('Group Members')}}</a>
                         <a class="nav-item nav-link" id="nav-permissions-tab" data-toggle="tab" href="#nav-permissions"
@@ -35,7 +35,7 @@
                     <div class="card card-body border-top-0 tab-pane p-3 fade show active" id="nav-home" role="tabpanel"
                          aria-labelledby="nav-home-tab">
                         <div class="form-group">
-                            {!! Form::label('name', __('Name')) !!}
+                            {!! Form::label('name', __('Name') . '<small class="ml-1">*</small>', [], false) !!}
                             {!! Form::text('name', null, [
                             'id' => 'name',
                             'class'=> 'form-control',
@@ -98,7 +98,7 @@
                         <div class="accordion" id="accordionPermissions">
                             <div class="mb-3 custom-control custom-switch">
                                 <input v-model="selectAll" type="checkbox" class="custom-control-input" id="selectAll" @click="select">
-                                <label class="custom-control-label" for="selectAll">{{ __('Assign all permissions to this user') }}</label>
+                                <label class="custom-control-label" for="selectAll">{{ __('Assign all permissions to this group') }}</label>
                             </div>
                             @include('admin.shared.permissions')
                             <div class="d-flex justify-content-end mt-3">
@@ -122,7 +122,7 @@
                         </div>
                         <div class="modal-body">
                             <div class="form-user">
-                                {!!Form::label('users', __('Users'))!!}
+                                {!!Form::label('users', __('Users') . '<small class="ml-1">*</small>', [], false)!!}
                                 <multiselect v-model="selectedUsers"
                                              placeholder="{{__('Select user or type here to search users')}}"
                                              :options="availableUsers"
@@ -156,7 +156,7 @@
 
                                     <template slot="option" slot-scope="props">
                                         <div class="option__desc d-flex align-items-center">
-                                            <span class="option__title mr-1">@{{ props.option.fullname }}</span>
+                                            <span class="option__title mr-1">@{{ props.option.fullname }} (@{{ props.option.username }})</span>
                                         </div>
                                     </template>
                                 </multiselect>

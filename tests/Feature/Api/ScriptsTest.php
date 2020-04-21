@@ -5,6 +5,7 @@ namespace Tests\Feature\Api;
 use Faker\Factory as Faker;
 use ProcessMaker\Models\Script;
 use ProcessMaker\Models\ScriptCategory;
+use ProcessMaker\Models\ScriptExecutor;
 use ProcessMaker\Models\User;
 use Tests\TestCase;
 use Tests\Feature\Shared\RequestHelper;
@@ -26,6 +27,11 @@ class ScriptsTest extends TestCase
         'script_category_id',
         'description'
     ];
+
+    protected function setUpExecutors() {
+        ScriptExecutor::setTestConfig('php');
+        ScriptExecutor::setTestConfig('lua');
+    }
 
     public function setUpWithPersonalAccessClient()
     {
@@ -58,7 +64,7 @@ class ScriptsTest extends TestCase
         $url = self::API_TEST_SCRIPT;
         $response = $this->apiCall('POST', $url, [
             'title' => 'Script Title',
-            'language' => 'php',
+            'script_executor_id' => ScriptExecutor::initialExecutor('php')->id,
             'code' => '123',
             'description' => 'Description',
             'script_category_id' => $category->getkey(),
@@ -71,6 +77,8 @@ class ScriptsTest extends TestCase
 
     public function testCreateCategoryRequired()
     {
+        ScriptExecutor::setTestConfig('php');
+
         $url = route('api.scripts.store');
         $params = [
             'title' => 'Title',
@@ -397,7 +405,13 @@ class ScriptsTest extends TestCase
     public function testPreviewScriptFail()
     {
         Notification::fake();
-        $url = route('api.scripts.preview', $this->getScript('foo')->id);
+        $script = $this->getScript('php');
+        // manually override language
+        $script->language = 'foo';
+        $script->script_executor_id = 123;
+        $script->saveOrFail();
+
+        $url = route('api.scripts.preview', $script->id);
         $response = $this->apiCall('POST', $url, ['data' => 'foo', 'config' => 'foo', 'code' => 'foo']);
 
         // Assertion: An exception is notified to usr through broadcast channel

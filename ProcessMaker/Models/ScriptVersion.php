@@ -5,7 +5,6 @@ namespace ProcessMaker\Models;
 use Illuminate\Database\Eloquent\Model;
 use ProcessMaker\Traits\HasCategories;
 
-
 class ScriptVersion extends Model
 {
     use HasCategories;
@@ -13,11 +12,6 @@ class ScriptVersion extends Model
     const categoryClass = ScriptCategory::class;
 
     protected $connection = 'processmaker';
-
-    /**
-     * Do not automatically set created_at
-     */
-    const CREATED_AT = null;
 
     /**
      * Attributes that are not mass assignable.
@@ -37,5 +31,15 @@ class ScriptVersion extends Model
     public function setScriptCategoryIdAttribute($value)
     {
         return $this->setMultipleCategories($value, 'script_category_id');
+    }
+
+    /**
+     * Get the associated script
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     */
+    public function parent()
+    {
+        return $this->belongsTo(Script::class, 'script_id', 'id');
     }
 }

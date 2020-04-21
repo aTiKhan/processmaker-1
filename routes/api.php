@@ -10,6 +10,7 @@ Route::group(
     // Users
     Route::get('users', 'UserController@index')->name('users.index')->middleware('can:view-users');
     Route::get('users/{user}', 'UserController@show')->name('users.show'); //Permissions handled in the controller
+    Route::get('deleted_users', 'UserController@deletedUsers')->name('users.deletedUsers')->middleware('can:view-users'); 
     Route::post('users', 'UserController@store')->name('users.store')->middleware('can:create-users');
     Route::put('users/restore', 'UserController@restore')->name('users.restore')->middleware('can:create-users');
     Route::put('users/{user}', 'UserController@update')->name('users.update'); //Permissions handled in the controller
@@ -72,6 +73,7 @@ Route::group(
     Route::delete('scripts/{script}', 'ScriptController@destroy')->name('scripts.destroy')->middleware('can:delete-scripts');
     Route::post('scripts/{script}/preview', 'ScriptController@preview')->name('scripts.preview')->middleware('can:view-scripts');
     Route::post('scripts/execute/{script_id}/{script_key?}', 'ScriptController@execute')->name('scripts.execute')->middleware('can:view-scripts');
+    Route::get('scripts/execution/{key}', 'ScriptController@execution')->name('scripts.execution')->middleware('can:view-scripts');
 
     // Script Categories
     Route::get('script_categories', 'ScriptCategoryController@index')->name('script_categories.index')->middleware('can:view-script-categories');
@@ -157,16 +159,20 @@ Route::group(
     Route::put('comments/{comment}', 'CommentController@update')->name('comments.update')->middleware('can:edit-comments');
     Route::delete('comments/{comment}', 'CommentController@destroy')->name('comments.destroy')->middleware('can:delete-comments');
 
-
-    //DataSources
-    Route::get('data_sources', 'DataSourcesController@index')->name('data-sources.index')->middleware('can:view-data-sources');
-    Route::get('data_sources/{data_source}', 'DataSourcesController@show')->name('data-sources.show')->middleware('can:view-data-sources');
-    Route::post('requests/{request}/data_sources/{data_source}', 'DataSourcesController@executeDataSource');
-    Route::post('requests/data_sources/{data_source}', 'DataSourcesController@executeDataSourceTest');
-
+    // Global signals
+    Route::get('signals', 'SignalController@index')->name('signals.index')->middleware('can:view-processes');
+    Route::get('signlas/{signalId}', 'SignalController@show')->name('signals.show')->middleware('can:view-processes');
 
     //UI customization
     Route::post('customize-ui', 'CssOverrideController@store')->name('customize-ui.store');
+
+    // Rebuild Script Executors
+    Route::get('script-executors', 'ScriptExecutorController@index')->name('script-executors.index');
+    Route::get('script-executors/available-languages', 'ScriptExecutorController@availableLanguages')->name('script-executors.available-languages');
+    Route::put('script-executors/{script_executor}', 'ScriptExecutorController@update')->name('script-executors.update');
+    Route::post('script-executors', 'ScriptExecutorController@store')->name('script-executors.store');
+    Route::post('script-executors/cancel', 'ScriptExecutorController@cancel')->name('script-executors.cancel');
+    Route::delete('script-executors/{script_executor}', 'ScriptExecutorController@delete')->name('script-executors.delete');
 
     // debugging javascript errors
     Route::post('debug', 'DebugController@store')->name('debug.store')->middleware('throttle');

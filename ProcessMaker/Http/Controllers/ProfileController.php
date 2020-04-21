@@ -6,10 +6,12 @@ use Illuminate\Http\Request;
 use ProcessMaker\Models\User;
 use ProcessMaker\Models\JsonData;
 use ProcessMaker\i18nHelper;
-
+use ProcessMaker\Traits\HasControllerAddons;
 
 class ProfileController extends Controller
 {
+    use HasControllerAddons;
+
     /**
      * edit your profile.
      *
@@ -20,6 +22,7 @@ class ProfileController extends Controller
         $currentUser = \Auth::user();
         $states = JsonData::states();
         $countries = JsonData::countries();
+        $status = [__('ACTIVE'), __('INACTIVE')];
 
         $langs = ['en'];
         if (app()->getProvider(\ProcessMaker\Package\Translations\PackageServiceProvider::class)) {
@@ -42,8 +45,11 @@ class ProfileController extends Controller
                                 }
                             );
 
+        $addons = $this->getPluginAddons('edit', []);
+
         return view('profile.edit',
-            compact('currentUser', 'states', 'timezones', 'countries', 'datetimeFormats', 'availableLangs'));
+            compact('currentUser', 'states', 'timezones', 'countries', 'datetimeFormats', 'availableLangs',
+                'status', 'addons'));
     }
 
     /**

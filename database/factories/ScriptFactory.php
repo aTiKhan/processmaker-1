@@ -3,6 +3,7 @@
 use Faker\Generator as Faker;
 use ProcessMaker\Models\Script;
 use ProcessMaker\Models\ScriptCategory;
+use ProcessMaker\Models\ScriptExecutor;
 
 $factory->define(Script::class, function (Faker $faker) {
     return [
@@ -13,6 +14,6 @@ $factory->define(Script::class, function (Faker $faker) {
         'description' => $faker->sentence,
         'script_category_id' => function () {
             return factory(ScriptCategory::class)->create()->getKey();
-        }
+        },
     ];
 });

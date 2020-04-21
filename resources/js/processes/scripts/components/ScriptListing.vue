@@ -80,7 +80,7 @@
         ref="pagination"
       ></pagination>
     </div>
-    <b-modal ref="myModalRef" :title="$t('Copy Script')" centered>
+    <b-modal ref="myModalRef" :title="$t('Copy Script')" centered  header-close-content="&times;" >
       <form>
         <div class="form-group">
           <label for="title">{{ $t('Name') }}<small class="ml-1">*</small></label>
@@ -92,6 +92,15 @@
             v-bind:class="{ 'is-invalid': errors.title }"
           />
           <div class="invalid-feedback" v-if="errors.title">{{errors.title[0]}}</div>
+        </div>
+        <div class="form-group">
+          <category-select
+          :label="$t('Category')"
+          api-get="script_categories"
+          api-list="script_categories"
+          v-model="dupScript.script_category_id"
+          :errors="errors.script_category_id">
+          </category-select>
         </div>
         <div class="form-group">
           <label for="description">{{ $t('Description') }}</label>
@@ -112,14 +121,15 @@ import dataLoadingMixin from "../../../components/common/mixins/apiDataLoading";
 
 export default {
   mixins: [datatableMixin, dataLoadingMixin],
-  props: ["filter", "id", "permission", "scriptFormats"],
+  props: ["filter", "id", "permission", "scriptExecutors"],
   data() {
     return {
       dupScript: {
         title: "",
         type: "",
-        category: "",
-        description: ""
+        category: {},
+        description: "",
+        script_category_id: "",
       },
       errors: [],
       orderBy: "title",
@@ -216,6 +226,7 @@ export default {
           this.dupScript.code = data.code;
           this.dupScript.description = data.description;
           this.dupScript.category = data.category;
+          this.dupScript.script_category_id = data.script_category_id;
           this.dupScript.id = data.id;
           this.dupScript.run_as_user_id = data.run_as_user_id;
           this.showModal();
@@ -236,11 +247,7 @@ export default {
       }
     },
     formatLanguage(language) {
-      if (this.scriptFormats[language] !== undefined) {
-        return this.scriptFormats[language];
-      } else {
-        return language.toUpperCase();
-      }
+      return language;
     },
     fetch() {
       this.loading = true;

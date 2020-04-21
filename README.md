@@ -1,16 +1,16 @@
-# ProcessMaker 4 Community Edition Documentation
+# ProcessMaker 4 Documentation
 
-![](https://www.processmaker.com/assets/PartnerArea/new_logos/sample200_whitebg.png)
-
-[![CircleCI](https://circleci.com/gh/ProcessMaker/bpm/tree/develop.svg?style=svg&circle-token=bc15deff649712440252088a12ec20b4b7c96826)](https://circleci.com/gh/ProcessMaker/bpm/tree/develop)
-
-## ProcessMaker 4 Community Edition Documentation
-
-#### Overview
+# Overview
 
 ProcessMaker is an open source, workflow management software suite, which includes tools to automate your workflow, design forms, create documents, assign roles and users, create routing rules, and map an individual process quickly and easily. It's relatively lightweight and doesn't require any kind of installation on the client computer. This file describes the requirements and installation steps for the server.
 
-### Development
+## Using ProcessMaker 4
+
+The online documentation for usage of ProcessMaker 4 can be found by clicking the link below.
+
+https://processmaker.gitbook.io/processmaker/
+
+## Development
 
 #### System Requirements
 
@@ -51,7 +51,14 @@ APP_DEBUG=TRUE
 
 Optionally, trust the self-signed certificate on your host machine so you don't get the "Not Secure" warnings in chrome and postman.
 
-For macOS: 1. In your-repository-root/storage/ssl, double-click on processmaker.local.processmaker.com.crt 2. Click on "Add" to add it to your login keychain 3. In the Keychain Access window click on the Certificates category on the bottom left. 4. Double-click on the processmaker certificate 5. Open the Trust section. For "When using this certificate", select "always trust" 6. Close the window. You will be asked for your password. Close and reopen the processmaker tab in chrome.
+For macOS: 
+
+1. In `your-repository-root/storage/ssl`, double-click on `processmaker.local.processmaker.com.crt` 
+2. Click on "Add" to add it to your login keychain 
+3. In the Keychain Access window click on the Certificates category on the bottom left. 
+4. Double-click on the processmaker certificate 
+5. Open the Trust section. For `"When using this certificate"`, select `"always trust"`
+6. Close the window. You will be asked for your password. Close and reopen the processmaker tab in chrome.
 
 If you choose not to install the certificate, you should access the socket.io js file in your browser to allow unsafe connections from it. Otherwise, real-time notifications may not work in your development environment.
 
@@ -72,7 +79,9 @@ LOGIN_LOGO_PATH={{LOGIN PAGE LOGO PATH HERE}}
 
 #### Scheduled tasks/events
 
-To run time based BPMN events like Timer Start Events or Intermediate Timer Events, the laravel scheduler should be enabled. To do this open a console and: 1. Execute crontab -e 2. Add to the cron tab the following line \(replacing the upper cased text with the directory where your proyecto is located \):
+To run time based BPMN events like Timer Start Events or Intermediate Timer Events, the laravel scheduler should be enabled. To do this open a console and: 
+1. Execute crontab -e 
+2. Add to the cron tab the following line \(replacing the upper cased text with the directory where your proyecto is located \):
 
 ```text
 * * * * * cd YOUR_BPM_PROJECT && php artisan schedule:run >> /dev/null 2>&1
@@ -247,4 +256,3 @@ Distributed under the [AGPL Version 3](https://www.gnu.org/licenses/agpl-3.0.en.
 ProcessMaker \(C\) 2002 - 2019 ProcessMaker Inc.
 
 For further information visit: [http://www.processmaker.com/](http://www.processmaker.com/)
-

@@ -77,5 +77,19 @@
                     @{{errors.language}}
                 </div>
             </div>
+
+            <div class="form-group">
+                {!! Form::label('status', __('Status')) !!}
+                <b-form-select id="status" v-model="formData.status" class="form-control" :options="status">
+                </b-form-select>
+                <div class="invalid-feedback" v-if="errors.status">
+                    @{{errors.status}}
+                </div>
+            </div>
     </div>
+    @isset($addons)
+        @foreach ($addons as $addon)
+            {!! __($addon['content']) !!}
+        @endforeach
+    @endisset
 </div>

@@ -89,10 +89,10 @@
         ref="pagination"
       ></pagination>
     </div>
-    <b-modal ref="myModalRef" :title="$t('Copy Screen')" centered>
+    <b-modal ref="myModalRef" :title="$t('Copy Screen')" centered header-close-content="&times;">
       <form>
         <div class="form-group">
-          <label for="title">{{$t('Name')}}</label>
+          <label for="title">{{$t('Name')}}<small class="ml-1">*</small></label>
           <input
             type="text"
             class="form-control"

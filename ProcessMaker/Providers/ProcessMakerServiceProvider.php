@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Validator;
 use ProcessMaker\Managers\ModelerManager;
 use ProcessMaker\Managers\PackageManager;
 use ProcessMaker\Managers\ScreenBuilderManager;
+use ProcessMaker\Managers\ScriptBuilderManager;
 use ProcessMaker\Events\ScreenBuilderStarting;
 use Laravel\Horizon\Horizon;
 use Laravel\Passport\Passport;
@@ -49,9 +50,9 @@ class ProcessMakerServiceProvider extends ServiceProvider
             return "<?php echo htmlentities(lavaryMenuJson({$menu}), ENT_QUOTES); ?>";
         });
 
-        //Custom validator for process, scripts, etc names (just alphanumeric, space or dash characters)
+        //Custom validator for process, scripts, etc names (just alphanumeric, space, apostrophe or dash characters)
         Validator::extend('alpha_spaces', function ($attr, $val) {
-            return preg_match('/^[\pL\s\-\_\d\.]+$/u', $val);
+            return preg_match('/^[\pL\s\-\_\d\.\']+$/u', $val);
         });
 
 
@@ -87,6 +88,15 @@ class ProcessMakerServiceProvider extends ServiceProvider
         $this->app->singleton(ScreenBuilderManager::class, function($app) {
             return new ScreenBuilderManager();
         });
+
+        /**
+         * Maps our Script Builder Manager as a singleton. The Script builder Manager is used
+         * to manage customizations to the Process Script Builder.
+         */
+        $this->app->singleton(ScriptBuilderManager::class, function($app) {
+            return new ScriptBuilderManager();
+        });
+
         // Listen to the events for our core screen types and add our javascript
         Event::listen(ScreenBuilderStarting::class, function($event) {
             // Add any extensions to form builder/renderer from packages

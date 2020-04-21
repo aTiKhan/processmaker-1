@@ -3,8 +3,10 @@
 namespace ProcessMaker\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use ProcessMaker\Traits\HasSelfServiceTasks;
+use ProcessMaker\Contracts\ProcessModelInterface;
 use ProcessMaker\Traits\HasCategories;
+use ProcessMaker\Traits\HasSelfServiceTasks;
+use ProcessMaker\Traits\ProcessTrait;
 
 /**
  * ProcessVersion is used to store the historical version of a process.
@@ -20,19 +22,15 @@ use ProcessMaker\Traits\HasCategories;
  * @property \Carbon\Carbon $created_at
  *
  */
-class ProcessVersion extends Model
+class ProcessVersion extends Model implements ProcessModelInterface
 {
     use HasSelfServiceTasks;
     use HasCategories;
+    use ProcessTrait;
 
     const categoryClass = ProcessCategory::class;
 
     protected $connection = 'processmaker';
-
-    /**
-     * Do not automatically set created_at
-     */
-    const CREATED_AT = null;
 
     /**
      * Attributes that are not mass assignable.
@@ -48,6 +46,7 @@ class ProcessVersion extends Model
         'start_events' => 'array',
         'warnings' => 'array',
         'self_service_tasks' => 'array',
+        'signal_events' => 'array',
     ];
 
     /**
@@ -69,5 +68,25 @@ class ProcessVersion extends Model
     public function setProcessCategoryIdAttribute($value)
     {
         return $this->setMultipleCategories($value, 'process_category_id');
+    }
+
+    /**
+     * The process to which belongs this version
+     *
+     * @return Process
+     */
+    public function process()
+    {
+        return $this->belongsTo(Process::class);
+    }
+
+    /**
+     * Get the associated process
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     */
+    public function parent()
+    {
+        return $this->belongsTo(Process::class, 'process_id', 'id');
     }
 }

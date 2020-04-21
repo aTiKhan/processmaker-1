@@ -10,6 +10,7 @@ use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Artisan;
+use ProcessMaker\Models\ScriptExecutor;
 
 // Bootstrap laravel
 app()->make(Kernel::class)->bootstrap();
@@ -31,8 +32,6 @@ if (env('RUN_MSSQL_TESTS')) {
         'username' => env('DB_USERNAME', 'root'),
         'password' => env('DB_PASSWORD', ''),
         'unix_socket' => env('DB_SOCKET', ''),
-        'charset' => 'utf8mb4',
-        'collation' => 'utf8mb4_unicode_ci',
         'prefix' => '',
         'strict' => true,
         'engine' => null,
@@ -93,4 +92,12 @@ if (env('RUN_MSSQL_TESTS')) {
 // THIS IS FOR STANDARD PROCESSMAKER TABLES
 if (env('POPULATE_DATABASE')) {
     Artisan::call('migrate:fresh', []);
+}
+
+if (count(ScriptExecutor::listOfExecutorImages('php')) === 0) {
+    Artisan::call('docker-executor-php:install');
+}
+
+if (count(ScriptExecutor::listOfExecutorImages('lua')) === 0) {
+    Artisan::call('docker-executor-lua:install');
 }

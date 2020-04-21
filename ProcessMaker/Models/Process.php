@@ -9,11 +9,14 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Mustache_Engine;
 use ProcessMaker\AssignmentRules\PreviousTaskAssignee;
+use ProcessMaker\Contracts\ProcessModelInterface;
+use ProcessMaker\Exception\InvalidUserAssignmentException;
 use ProcessMaker\Exception\TaskDoesNotHaveRequesterException;
 use ProcessMaker\Exception\TaskDoesNotHaveUsersException;
-use ProcessMaker\Exception\InvalidUserAssignmentException;
 use ProcessMaker\Nayra\Contracts\Bpmn\ActivityInterface;
+use ProcessMaker\Nayra\Contracts\Bpmn\ProcessInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\ScriptTaskInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\ServiceTaskInterface;
 use ProcessMaker\Nayra\Contracts\Storage\BpmnDocumentInterface;
@@ -26,10 +29,10 @@ use ProcessMaker\Traits\HideSystemResources;
 use ProcessMaker\Traits\ProcessStartEventAssignmentsTrait;
 use ProcessMaker\Traits\ProcessTaskAssignmentsTrait;
 use ProcessMaker\Traits\ProcessTimerEventsTrait;
+use ProcessMaker\Traits\ProcessTrait;
 use ProcessMaker\Traits\SerializeToIso8601;
 use Spatie\MediaLibrary\HasMedia\HasMedia;
 use Spatie\MediaLibrary\HasMedia\HasMediaTrait;
-use Mustache_Engine;
 
 /**
  * Represents a business process definition.
@@ -54,7 +57,6 @@ use Mustache_Engine;
  *   @OA\Property(property="pause_timer_start", type="integer"),
  *   @OA\Property(property="cancel_screen_id", type="integer"),
  *   @OA\Property(property="has_timer_start_events", type="boolean"),
- *   @OA\Property(property="start_events", type="string", format="json"),
  * ),
  * @OA\Schema(
  *   schema="Process",
@@ -104,7 +106,7 @@ use Mustache_Engine;
  *      @OA\Schema(ref="#/components/schemas/ProcessEditable"),
  *      @OA\Schema(
  *         @OA\Property( property="status", type="object"),
- *         @OA\Property( property="assignable", type="array[]")
+ *         @OA\Property( property="assignable", type="array", @OA\Items(type="string") )
  *      )
  *    }
  * ),
@@ -115,24 +117,25 @@ use Mustache_Engine;
  *       @OA\Schema(ref="#/components/schemas/ProcessEditable"),
  *       @OA\Schema(ref="#/components/schemas/Process"),
  *       @OA\Schema(
- *           @OA\Property(property="notifications", type="array[]"),
+ *           @OA\Property(property="notifications", type="array", @OA\Items(type="string")),
  *       )
  *   }
  * )
  */
-class Process extends Model implements HasMedia
+class Process extends Model implements HasMedia, ProcessModelInterface
 {
     use HasMediaTrait;
     use SerializeToIso8601;
     use SoftDeletes;
     use ProcessTaskAssignmentsTrait;
+    use HasVersioning;
     use ProcessTimerEventsTrait;
     use ProcessStartEventAssignmentsTrait;
     use HideSystemResources;
     use PMQL;
     use HasCategories;
-    use HasVersioning;
     use HasSelfServiceTasks;
+    use ProcessTrait;
 
     const categoryClass = ProcessCategory::class;
 
@@ -169,15 +172,9 @@ class Process extends Model implements HasMedia
      * @var array
      */
     protected $hidden = [
-        'bpmn'
+        'bpmn',
+        'svg',
     ];
-
-    /**
-     * Parsed process BPMN definitions.
-     *
-     * @var \ProcessMaker\Nayra\Contracts\Storage\BpmnDocumentInterface
-     */
-    private $bpmnDefinitions;
 
     public $requestNotifiableTypes = [
         'requester',
@@ -211,6 +208,7 @@ class Process extends Model implements HasMedia
         'start_events' => 'array',
         'warnings' => 'array',
         'self_service_tasks' => 'array',
+        'signal_events' => 'array',
     ];
 
     /**
@@ -415,45 +413,6 @@ class Process extends Model implements HasMedia
         return $query->where('processes.status', 'INACTIVE');
     }
 
-    /**
-     * Get the process definitions from BPMN field.
-     *
-     * @param bool $forceParse
-     *
-     * @return \ProcessMaker\Nayra\Contracts\Storage\BpmnDocumentInterface
-     */
-    public function getDefinitions($forceParse = false, $engine = null)
-    {
-        if ($forceParse || empty($this->bpmnDefinitions)) {
-            $options = ['process' => $this];
-            !$engine ?: $options['engine'] = $engine;
-            $this->bpmnDefinitions = app(BpmnDocumentInterface::class, $options);
-            if ($this->bpmn) {
-                $this->bpmnDefinitions->loadXML($this->bpmn);
-                //Load the collaborations if exists
-                $collaborations = $this->bpmnDefinitions->getElementsByTagNameNS(BpmnDocument::BPMN_MODEL, 'collaboration');
-                foreach ($collaborations as $collaboration) {
-                    try {
-                        $collaboration->getBpmnElementInstance();
-                    } catch (\ProcessMaker\Nayra\Exceptions\ElementNotFoundException $e) {
-                        if (is_array($this->warnings)) {
-                            $warnings = $this->warnings;
-                        } else {
-                            $warnings = [];
-                        }
-
-                        $warnings[] = [
-                            'title' => __('Element Not Found'),
-                            'text' => $e->getMessage()
-                        ];
-                        $this->warnings = $warnings;
-                    }
-                }
-            }
-        }
-        return $this->bpmnDefinitions;
-    }
-
     public function getCollaborations()
     {
         $this->bpmnDefinitions = app(BpmnDocumentInterface::class, ['process' => $this]);
@@ -537,6 +496,7 @@ class Process extends Model implements HasMedia
         }
 
         switch ($assignmentType) {
+            case 'user_group':
             case 'group':
                 $user = $this->getNextUserFromGroupAssignment($activity->getId());
                 break;
@@ -694,6 +654,19 @@ class Process extends Model implements HasMedia
                 $eval = $formalExp($instanceData);
                 if ($eval) {
                     switch ($item->type) {
+                        case 'user_group':
+                            $users =  [];
+                            foreach ($item->assignee->users as $user) {
+                                $users[$user] = $user;
+                            }
+                            foreach ($item->assignee->groups as $group) {
+                                $this->getConsolidatedUsers($group, $users);
+                            }
+                            $user = $this->getNextUserFromGroupAssignment(
+                                $activity->getId(),
+                                $users
+                            );
+                            break;
                         case 'group':
                             $users = [];
                             $user = $this->getNextUserFromGroupAssignment(
@@ -710,6 +683,11 @@ class Process extends Model implements HasMedia
                         case 'manual':
                         case 'self_service':
                             $user = null;
+                            break;
+                        case 'user_by_id':
+                            $mustache = new Mustache_Engine();
+                            $assigneeId = $mustache->render($item->assignee, $instanceData);
+                            $user = $assigneeId;
                             break;
                         case 'script':
                         default:
@@ -1107,5 +1085,32 @@ class Process extends Model implements HasMedia
     {
         return $this->versions()->orderBy('id', 'desc')->first();
     }
-    
+
+    /**
+     * Check if process is valid for execution
+     *
+     * @return boolean
+     */
+    public function isValidForExecution()
+    {
+        return empty($this->warnings) && !empty($this->getLatestVersion());
+    }
+
+    /**
+     * Get the unique Signal References for the Signal Start Events.
+     *
+     * @return array
+     */
+    public function getUpdatedStartEventsSignalEvents(): array
+    {
+        $eventDefinitions = collect($this->start_events)->pluck('eventDefinitions')->flatten(1);
+
+        $signalEventDefinitions = $eventDefinitions->filter(function ($eventDefinition) {
+            return $eventDefinition['$type'] === 'signalEventDefinition';
+        });
+
+        $signalReferences = $signalEventDefinitions->pluck('signalRef')->unique();
+
+        return $signalReferences->toArray();
+    }
 }

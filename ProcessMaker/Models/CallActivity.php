@@ -8,11 +8,10 @@ use ProcessMaker\Nayra\Bpmn\Events\ActivityClosedEvent;
 use ProcessMaker\Nayra\Bpmn\Events\ActivityCompletedEvent;
 use ProcessMaker\Nayra\Contracts\Bpmn\ActivityInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\CallActivityInterface;
+use ProcessMaker\Nayra\Contracts\Bpmn\ErrorInterface;
+use ProcessMaker\Nayra\Contracts\Bpmn\FlowInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\TokenInterface;
 use ProcessMaker\Nayra\Contracts\Engine\ExecutionInstanceInterface;
-use ProcessMaker\Nayra\Contracts\Bpmn\FlowInterface;
-use ProcessMaker\Nayra\Contracts\Bpmn\ErrorInterface;
-use ProcessMaker\Nayra\Contracts\Bpmn\CallableElementInterface;
 
 /**
  * Call Activity model
@@ -28,7 +27,7 @@ class CallActivity implements CallActivityInterface
     }
 
     /**
-     * Configure the activity to go to a FAILING status when activated.
+     * Initialize the Call Activity element.
      *
      */
     protected function initActivity()
@@ -56,7 +55,6 @@ class CallActivity implements CallActivityInterface
         $callable = $this->getCalledElement();
         // Capability to specify the target start event on the sequence flow to the call activity.
         $startId = $sequenceFlow->getProperty('startEvent');
-        $startEvent = $startId ? $callable->getEngine()->getStorage()->getElementInstanceById($startId) : null;
         $dataStore = $callable->getRepository()->createDataStore();
         // The entire data model is sent to the target
         $data = $token->getInstance()->getDataStore()->getData();
@@ -70,8 +68,14 @@ class CallActivity implements CallActivityInterface
 
         $configString = $this->getProperty('config');
         if ($configString) {
-            $data['_parent']['config'] = json_decode($configString, true);
+            $config = json_decode($configString, true);
+            $data['_parent']['config'] = $config;
+            if (isset($config['startEvent'])) {
+                $startId = $config['startEvent'];
+            }
         }
+
+        $startEvent = $startId ? $callable->getOwnerDocument()->getElementInstanceById($startId) : null;
 
         $dataStore->setData($data);
         $instance = $callable->call($dataStore, $startEvent);
@@ -140,14 +144,14 @@ class CallActivity implements CallActivityInterface
         $calledElementRef = $this->getProperty(CallActivityInterface::BPMN_PROPERTY_CALLED_ELEMENT);
         $refs = explode('-', $calledElementRef);
         if (count($refs) === 1) {
-            $localBpmn = $this->ownerProcess->getEngine()->getStorage();
-            return $localBpmn->getElementInstanceById($calledElementRef);
+            return $this->getOwnerDocument()->getElementInstanceById($calledElementRef);
         } elseif (count($refs) === 2) {
             // Capability to reuse other processes inside a process
             $process = Process::findOrFail($refs[1]);
             $engine = $this->getProcess()->getEngine();
-            return isset($engine->currentInstance) ? $engine->currentInstance->getProcess()
-                : $process->getDefinitions(false, $engine)->getElementInstanceById($refs[0]);
+            $definitions = $engine->getDefinition($process->getLatestVersion());
+            $response = $definitions->getElementInstanceById($refs[0]);
+            return $response;
         }
     }
 

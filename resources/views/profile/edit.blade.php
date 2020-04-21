@@ -75,9 +75,10 @@
 @section('js')
 	<script src="{{mix('js/admin/profile/edit.js')}}"></script>
 
-    <script>
+<script>
         let formVueInstance = new Vue({
             el: '#profileForm',
+            mixins:addons,
             data: {
                 formData: @json($currentUser),
                 langs: @json($availableLangs),
@@ -85,6 +86,7 @@
                 datetimeFormats: @json($datetimeFormats),
                 countries: @json($countries),
                 states: @json($states),
+                status: @json($status),
                 errors: {
                     username: null,
                     firstname: null,

@@ -6,6 +6,7 @@ use Log;
 use ProcessMaker\Models\EnvironmentVariable;
 use ProcessMaker\Models\ScriptDockerBindingFilesTrait;
 use ProcessMaker\Models\ScriptDockerCopyingFilesTrait;
+use ProcessMaker\Models\ScriptExecutor;
 use ProcessMaker\Models\User;
 use RuntimeException;
 use ProcessMaker\GenerateAccessToken;
@@ -31,6 +32,19 @@ abstract class Base
      * @var \ProcessMaker\Models\User $user
      */
     private $user;
+
+
+    /**
+     * Set the script executor
+     *
+     * @var \ProcessMaker\Models\User $user
+     */
+    private $scriptExecutor;
+
+    public function __construct(ScriptExecutor $scriptExecutor)
+    {
+        $this->scriptExecutor = $scriptExecutor;
+    }
 
     /**
      * Run a script code.
@@ -63,6 +77,10 @@ abstract class Base
         } else {
             $parameters = '';
         }
+
+        // Set docker shared memory size
+        $parameters .= ' --shm-size=' . env('DOCKER_SHARED_MEMORY', '256m');
+
         $dockerConfig = $this->config($code, [
             'timeout' => $timeout,
             'parameters' => $parameters,
@@ -74,6 +92,12 @@ abstract class Base
                 'response' => '/opt/executor/output.json'
             ]
         ]);
+
+        // If the image is not specified, use the one set by the executor
+        if (!isset($dockerConfig['image'])) {
+            $dockerConfig['image'] = $this->scriptExecutor->dockerImageName();
+        }
+
         // Execute docker
         $executeMethod = config('app.processmaker_scripts_docker_mode') === 'binding'
             ? 'executeBinding' : 'executeCopying';

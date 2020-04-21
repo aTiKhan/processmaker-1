@@ -119,9 +119,10 @@ class TokenRepository implements TokenRepositoryInterface
         $token->process_request_id = $token->getInstance()->getKey();
         $token->user_id = empty(Auth::user()) ? null : Auth::user()->id;
 
-        $token->data = null;
+        $token->data = $token->getInstance()->getDataStore()->getData();
         $token->due_at = null;
-        $token->initiated_at = null;
+        $token->initiated_at = Carbon::now();
+        $token->completed_at = Carbon::now();
         $token->riskchanges_at = null;
         $token->saveOrFail();
         $token->setId($token->getKey());
@@ -213,6 +214,7 @@ class TokenRepository implements TokenRepositoryInterface
         $token->riskchanges_at = null;
         $token->saveOrFail();
         $token->setId($token->getKey());
+        $token->getInstance()->updateCatchEvents();
     }
 
     public function persistCatchEventTokenConsumed(CatchEventInterface $intermediateCatchEvent, TokenInterface $token)

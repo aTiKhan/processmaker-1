@@ -1,26 +1,38 @@
 <template>
   <b-container id="modeler-app" class="container p-0">
     <b-card no-body class="h-100 border-top-0">
-      <modeler 
-        ref="modeler" 
-        @validate="validationErrors = $event" 
-        @warnings="warnings = $event" 
-        @saveBpmn="saveBpmn" 
-      />
-      
-      <validation-status 
-        ref="validationStatus" 
-        :validation-errors="validationErrors" 
-        :warnings="warnings" 
-      />
+      <b-card-body class="overflow-hidden position-relative p-0 vh-100" data-test="body-container">
+        <modeler
+          ref="modeler"
+          :owner="self"
+          :decorations="decorations"
+          @validate="validationErrors = $event"
+          @warnings="warnings = $event"
+          @saveBpmn="emitRegisteredEvents"
+          @set-xml-manager="xmlManager = $event"
+        />
+      </b-card-body>
+
+      <validation-status
+        ref="validationStatus"
+        :validation-errors="validationErrors"
+        :warnings="warnings"
+        :owner="self"
+        :xml-manager="xmlManager"
+      >
+        <component v-for="(component, index) in validationBar" :key="`validation-status-${index}`" :is="component" :owner="self" />
+      </validation-status>
+
+      <component v-for="(component, index) in external" :key="`external-${index}`" :is="component.type" :options="component.options"/>
+
     </b-card>
   </b-container>
 </template>
 
 <script>
-import { Modeler, ValidationStatus } from "@processmaker/modeler";
+  import {Modeler, ValidationStatus} from "@processmaker/modeler";
 
-export default {
+  export default {
   name: 'ModelerApp',
   components: {
     Modeler,
@@ -28,9 +40,18 @@ export default {
   },
   data() {
     return {
+      self: this,
+      validationBar: [],
+      external: [],
+      externalEmit : [],
+      dataXmlSvg: {},
+      decorations: {
+        borderOutline: {},
+      },
       process: window.ProcessMaker.modeler.process,
       validationErrors: {},
       warnings: [],
+      xmlManager: null,
     };
   },
   methods: {
@@ -78,46 +99,63 @@ export default {
       });
       return notifications;
     },
-    saveBpmn() {
-      this.$refs.modeler.toXML((err, xml) => {
-        if(err) {
-          ProcessMaker.alert("There was an error saving: " + err, 'danger');
-        } else {
-          // lets save
-          // Call process update
-          var data = {
-            name: this.process.name,
-            description: this.process.description,
-            task_notifications: this.getTaskNotifications(),
-            bpmn: xml
-          };
-          ProcessMaker.apiClient.put('/processes/' + this.process.id, data)
-          .then((response) => {
-            this.process.updated_at = response.data.updated_at;
-            // Now show alert
-            ProcessMaker.alert(this.$t('The process was saved.'), 'success');
-            window.ProcessMaker.EventBus.$emit('save-changes');
-            this.$set(this, 'warnings', response.data.warnings || []);
-            if (response.data.warnings && response.data.warnings.length > 0) {
-              this.$refs.validationStatus.autoValidate = true;
-            }
-          })
-          .catch((err) => {
-            const message = err.response.data.message;
-            const errors = err.response.data.errors;
-            ProcessMaker.alert(message, 'danger');
-          })
+    emitRegisteredEvents ({xml, svg}) {
+      this.dataXmlSvg.xml = xml;
+      this.dataXmlSvg.svg = svg;
+
+      this.externalEmit.forEach(item => {
+        window.ProcessMaker.EventBus.$emit(item);
+      })
+      if (!this.externalEmit.length) {
+        window.ProcessMaker.EventBus.$emit('modeler-save');
+      }
+    },
+    saveProcess(onSuccess, onError) {
+      const data = {
+        name: this.process.name,
+        description: this.process.description,
+        task_notifications: this.getTaskNotifications(),
+        bpmn: this.dataXmlSvg.xml,
+        svg: this.dataXmlSvg.svg
+      };
+
+      const savedSuccessfully = (response) => {
+        this.process.updated_at = response.data.updated_at;
+        // Now show alert
+        ProcessMaker.alert(this.$t('The process was saved.'), 'success');
+        window.ProcessMaker.EventBus.$emit('save-changes');
+        this.$set(this, 'warnings', response.data.warnings || []);
+        if (response.data.warnings && response.data.warnings.length > 0) {
+          this.$refs.validationStatus.autoValidate = true;
         }
-      });
+        if (typeof onSuccess === 'function') {
+          onSuccess(response);
+        }
+      };
+
+      const saveFailed = (err) => {
+        const message = err.response.data.message;
+        const errors = err.response.data.errors;
+        ProcessMaker.alert(message, 'danger');
+
+        if (typeof onError === 'function') {
+          onError(err);
+        }
+      };
+
+      ProcessMaker.apiClient.put('/processes/' + this.process.id, data)
+              .then(savedSuccessfully)
+              .catch(saveFailed);
     }
   },
   mounted() {
     ProcessMaker.$modeler = this.$refs.modeler;
 
-    window.ProcessMaker.EventBus.$on('modeler-save', () => {
-      this.saveBpmn();
-    });
+    window.ProcessMaker.EventBus.$emit('modeler-app-init', this);
 
+    window.ProcessMaker.EventBus.$on('modeler-save', (onSuccess, onError) => {
+      this.saveProcess(onSuccess, onError);
+    });
     window.ProcessMaker.EventBus.$on('modeler-change', () => {
       this.refreshSession();
       window.ProcessMaker.EventBus.$emit('new-changes');

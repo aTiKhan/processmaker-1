@@ -6,6 +6,7 @@ use Illuminate\Foundation\Testing\WithFaker;
 use ProcessMaker\Models\Process;
 use ProcessMaker\Models\ProcessRequest;
 use ProcessMaker\Models\Script;
+use ProcessMaker\Models\ScriptExecutor;
 use Tests\Feature\Shared\RequestHelper;
 use Tests\TestCase;
 
@@ -43,6 +44,7 @@ class ServiceTaskExecutionTest extends TestCase
      */
     protected function withUserSetUp()
     {
+        ScriptExecutor::setTestConfig('php');
         factory(Script::class)->create([
             'key' => 'EchoConnector',
             'language' => 'php',

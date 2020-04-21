@@ -47,6 +47,12 @@ trait MakeHttpRequests
         $method = $mustache->render($endpoint['method'], $data);
         $url = $mustache->render($endpoint['url'], $data);
 
+        // If exists a query string in the call, add it to the URL
+        if (array_key_exists('queryString', $config)) {
+            $separator = strpos($url, '?') ? '&' : '?';
+            $url .= $separator . $config['queryString'];
+        }
+
         $this->verifySsl = array_key_exists('verify_certificate', $this->credentials)
                             ? $this->credentials['verify_certificate']
                             : true;
@@ -58,6 +64,21 @@ trait MakeHttpRequests
                 $headers[$mustache->render($header['key'], $data)] = $mustache->render($header['value'], $data);
             }
         }
+
+        if (isset($config['dataMapping'])) {
+            $mappedData = [];
+            foreach ($config['dataMapping'] as $map) {
+                $mappedData[$map['key']] =  $map['value'];
+            }
+
+            if (empty($endpoint['body'])) {
+                $endpoint['body'] = json_encode($mappedData);
+            } else  {
+                $endpointBody = json_decode($endpoint['body'], true);
+                $endpoint['body'] = json_encode(array_merge($endpointBody, $mappedData));
+            }
+        }
+
         $body = $mustache->render($endpoint['body'], $data);
         $bodyType = $mustache->render($endpoint['body_type'], $data);
         $request = [$method, $url, $headers, $body, $bodyType];
