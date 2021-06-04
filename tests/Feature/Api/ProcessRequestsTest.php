@@ -243,6 +243,26 @@ class ProcessRequestsTest extends TestCase
         $json = $response->json();
         $this->assertEquals($process->id, $json['data'][0]['process']['id']);
     }
+    
+    /**
+     * Get a list of requests with a user that has view all permission
+     */
+    public function testListRequestViewAllPermission()
+    {
+        $this->user = factory(User::class)->create(['status'=>'ACTIVE']);
+        $processRequest = factory(ProcessRequest::class)->create([]);
+
+        $response = $this->apiCall('GET', self::API_TEST_URL);
+        $json = $response->json();
+        $this->assertCount(0, $json['data']);
+
+        $this->user->giveDirectPermission('view-all_requests');
+        $this->user->refresh();
+        
+        $response = $this->apiCall('GET', self::API_TEST_URL);
+        $json = $response->json();
+        $this->assertEquals($processRequest->id, $json['data'][0]['id']);
+    }
 
     /**
      * Get a request
@@ -492,8 +512,10 @@ class ProcessRequestsTest extends TestCase
         ]);
 
         // Add the file to the request
-        $addedMedia = $request->addMedia($fileUpload)->toMediaCollection('local');
-
+        $addedMedia = $request
+            ->addMedia($fileUpload)
+            ->withCustomProperties(['data_name' => 'test'])
+            ->toMediaCollection('local');
 
         $route = self::API_TEST_URL . '/'. $request->id . '/files/' . $addedMedia->id;
         $response = $this->apiCall('GET', $route);

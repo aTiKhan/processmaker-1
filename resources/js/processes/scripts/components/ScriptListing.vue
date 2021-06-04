@@ -234,7 +234,7 @@ export default {
         case "remove-item":
           ProcessMaker.confirmModal(
             this.$t("Caution!"),
-            this.$t("Are you sure you want to delete {{item}}?", {
+            this.$t("Are you sure you want to delete {{item}}? Deleting this asset will break any active tasks that are assigned.", {
               item: data.title
             }),
             "",
@@ -279,12 +279,12 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-/deep/ th#_total_users {
+>>> th#_total_users {
   width: 150px;
   text-align: center;
 }
 
-/deep/ th#_description {
+>>> th#_description {
   width: 250px;
 }
 </style>

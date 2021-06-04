@@ -11,16 +11,19 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Notification;
+use ProcessMaker\Exception\PmqlMethodException;
 use ProcessMaker\Exception\ReferentialIntegrityException;
 use ProcessMaker\Facades\WorkflowManager;
 use ProcessMaker\Http\Controllers\Controller;
 use ProcessMaker\Http\Resources\ProcessRequests as ProcessRequestResource;
-use ProcessMaker\Http\Resources\ProcessRequestsCollection;
+use ProcessMaker\Http\Resources\ApiCollection;
 use ProcessMaker\Jobs\CancelRequest;
 use ProcessMaker\Jobs\TerminateRequest;
 use ProcessMaker\Models\Comment;
 use ProcessMaker\Models\ProcessRequest;
 use ProcessMaker\Models\ProcessRequestToken;
+use ProcessMaker\Models\Setting;
+use ProcessMaker\Models\User;
 use ProcessMaker\Nayra\Contracts\Bpmn\CatchEventInterface;
 use ProcessMaker\Notifications\ProcessCanceledNotification;
 use ProcessMaker\Query\SyntaxError;
@@ -45,8 +48,10 @@ class ProcessRequestController extends Controller
      * Display a listing of the resource.
      *
      * @param Request $request
+     * @param bool $getTotal used by Saved Search package to only return a total count instead of actual results
+     * @param User $user used by Saved Search package to return accurate counts
      *
-     * @return ProcessRequestsCollection
+     * @return ApiCollection
      *
      * /**
      * @OA\Get(
@@ -86,10 +91,14 @@ class ProcessRequestController extends Controller
      *     ),
      * )
      */
-    public function index(Request $request)
+    public function index(Request $request, $getTotal = false, User $user = null)
     {
+        // If a specific user is specified, use it; otherwise use the authorized user
+        if (! $user) {
+            $user = Auth::user();
+        }
+        
         // Update request permissions for the user
-        $user = Auth::user();
         $user->updatePermissionsToRequests();
 
         // Filter request with user permissions
@@ -120,11 +129,7 @@ class ProcessRequestController extends Controller
         
         $filter = $request->input('filter', '');
         if (!empty($filter)) {
-            $filter = '%' . mb_strtolower($filter) . '%';
-            $query->where(function ($query) use ($filter) {
-                $query->where(DB::raw('LOWER(name)'), 'like', $filter)
-                      ->orWhere(DB::raw('LOWER(data)'), 'like', $filter);
-            });
+            $query->filter($filter);
         }        
 
         $pmql = $request->input('pmql', '');
@@ -133,15 +138,29 @@ class ProcessRequestController extends Controller
                 $query->pmql($pmql);
             } catch (SyntaxError $e) {
                 return response(['message' => __('Your PMQL contains invalid syntax.')], 400);
+            } catch (PmqlMethodException $e) {
+                return response(['message' => $e->getMessage(), 'field' => $e->getField()], 400);
             }
         }
 
-        try {
-            $response = $query->orderBy(
-                str_ireplace('.', '->', $request->input('order_by', 'name')),
-                $request->input('order_direction', 'ASC')
-            )->get();//->paginate($request->input('per_page', 10));
+        if (! $user->can('view-all_requests')) {
+            $query->pmql('requester = "' . $user->username . '" OR participant = "' . $user->username . '"');
+        }
 
+        $query->nonSystem();
+
+        try {
+            if ($getTotal === true) {
+                return $query->count();
+            } elseif ($request->input('total') == 'true') {
+                return ['meta' => ['total' => $query->count()]];
+            } else {
+                $response = $query->orderBy(
+                    str_ireplace('.', '->', $request->input('order_by', 'name')),
+                    $request->input('order_direction', 'ASC')
+                )->paginate($request->input('per_page', 10));
+                $total = $response->total();
+            }
         } catch(QueryException $e) {
             throw $e;
             $rawMessage = $e->getMessage();
@@ -161,7 +180,8 @@ class ProcessRequestController extends Controller
         } else {
             $response = collect([]);
         }
-        return new ProcessRequestsCollection($response);
+
+        return new ApiCollection($response, $total);
     }
 
     /**
@@ -171,7 +191,7 @@ class ProcessRequestController extends Controller
      *
      * @return Response
      *
-     *      * @OA\Get(
+     * @OA\Get(
      *     path="/requests/{process_request_id}",
      *     summary="Get single process request by ID",
      *     operationId="getProcessRequestById",
@@ -182,14 +202,16 @@ class ProcessRequestController extends Controller
      *         name="process_request_id",
      *         required=true,
      *         @OA\Schema(
-     *           type="string",
+     *           type="integer",
      *         )
      *     ),
+     *     @OA\Parameter(ref="#/components/parameters/include"),
      *     @OA\Response(
      *         response=200,
      *         description="Successfully found the process",
      *         @OA\JsonContent(ref="#/components/schemas/processRequest")
      *     ),
+     *     @OA\Response(response=404, ref="#/components/responses/404"),
      * )
      */
     public function show(ProcessRequest $request)
@@ -216,7 +238,7 @@ class ProcessRequestController extends Controller
      *         name="process_request_id",
      *         required=true,
      *         @OA\Schema(
-     *           type="string",
+     *           type="integer",
      *         )
      *     ),
      *     @OA\RequestBody(
@@ -227,6 +249,7 @@ class ProcessRequestController extends Controller
      *         response=204,
      *         description="success",
      *     ),
+     *     @OA\Response(response=404, ref="#/components/responses/404"),
      * )
      */
     public function update(ProcessRequest $request, Request $httpRequest)
@@ -306,7 +329,7 @@ class ProcessRequestController extends Controller
      *         name="process_request_id",
      *         required=true,
      *         @OA\Schema(
-     *           type="string",
+     *           type="integer",
      *         )
      *     ),
      *     @OA\Response(
@@ -314,6 +337,7 @@ class ProcessRequestController extends Controller
      *         description="success",
      *         @OA\JsonContent(ref="#/components/schemas/processRequest")
      *     ),
+     *     @OA\Response(response=404, ref="#/components/responses/404"),
      * )
      */
     public function destroy(ProcessRequest $request)
@@ -368,7 +392,7 @@ class ProcessRequestController extends Controller
     {
         // Get the process definition
         $process = $request->process;
-        $catchEvent = $process->getDefinitions()->findElementById($event)->getBpmnElementInstance();
+        $catchEvent = $request->getVersionDefinitions()->findElementById($event)->getBpmnElementInstance();
         if (!($catchEvent instanceof CatchEventInterface)) {
             return abort(423, __('Invalid element, not a catch event ' . get_class($catchEvent)));
         }

@@ -1,4 +1,7 @@
 <?php
+
+use ProcessMaker\Http\Controllers\TestStatusController;
+
 Route::group(
     [
         'middleware' => ['auth:api', 'setlocale', 'bindings', 'sanitize'],
@@ -8,7 +11,7 @@ Route::group(
     ], function() {
 
     // Users
-    Route::get('users', 'UserController@index')->name('users.index')->middleware('can:view-users');
+    Route::get('users', 'UserController@index')->name('users.index');//Permissions handled in the controller
     Route::get('users/{user}', 'UserController@show')->name('users.show'); //Permissions handled in the controller
     Route::get('deleted_users', 'UserController@deletedUsers')->name('users.deletedUsers')->middleware('can:view-users'); 
     Route::post('users', 'UserController@store')->name('users.store')->middleware('can:create-users');
@@ -24,18 +27,19 @@ Route::group(
     Route::delete('users/{user}/tokens/{tokenId}', 'UserTokenController@destroy')->name('users.tokens.destroy'); // Permissions handled in the controller
 
 
-    // Groups
-    Route::get('groups', 'GroupController@index')->name('groups.index')->middleware('can:view-groups');
-    Route::get('groups/{group}', 'GroupController@show')->name('groups.show')->middleware('can:view-groups');
+    // Groups//Permissions policy
+    Route::get('groups', 'GroupController@index')->name('groups.index');//Permissions handled in the controller
+    Route::get('groups/{group}', 'GroupController@show')->name('groups.show');//Permissions handled in the controller
     Route::post('groups', 'GroupController@store')->name('groups.store')->middleware('can:create-groups');
     Route::put('groups/{group}', 'GroupController@update')->name('groups.update')->middleware('can:edit-groups');
     Route::delete('groups/{group}', 'GroupController@destroy')->name('groups.destroy')->middleware('can:delete-groups');
-    Route::get('group_users/{group}', 'GroupController@members')->name('groups.members')->middleware('can:view-groups');
+    Route::get('groups/{group}/users', 'GroupController@users')->name('groups.users')->middleware('can:view-groups');
+    Route::get('groups/{group}/groups', 'GroupController@groups')->name('groups.groups')->middleware('can:view-groups');
 
     // Group Members
     Route::get('group_members', 'GroupMemberController@index')->name('group_members.index'); //Already filtered in controller
     Route::get('group_members/{group_member}', 'GroupMemberController@show')->name('group_members.show')->middleware('can:view-groups');
-    Route::get('group_members_available', 'GroupMemberController@groupsAvailable')->name('group_members_available.show')->middleware('can:view-groups');
+    Route::get('group_members_available', 'GroupMemberController@groupsAvailable')->name('group_members_available.show'); //Permissions handled in the controller
     Route::get('user_members_available', 'GroupMemberController@usersAvailable')->name('user_members_available.show')->middleware('can:view-groups');
     Route::post('group_members', 'GroupMemberController@store')->name('group_members.store')->middleware('can:edit-groups');
     Route::delete('group_members/{group_member}', 'GroupMemberController@destroy')->name('group_members.destroy')->middleware('can:edit-groups');
@@ -48,8 +52,8 @@ Route::group(
     Route::delete('environment_variables/{environment_variable}', 'EnvironmentVariablesController@destroy')->name('environment_variables.destroy')->middleware('can:delete-environment_variables');
 
     // Screens
-    Route::get('screens', 'ScreenController@index')->name('screens.index')->middleware('can:view-screens');
-    Route::get('screens/{screen}', 'ScreenController@show')->name('screens.show')->middleware('can:view-screens');
+    Route::get('screens', 'ScreenController@index')->name('screens.index');//Permissions handled in the controller
+    Route::get('screens/{screen}', 'ScreenController@show')->name('screens.show');//Permissions handled in the controller
     Route::post('screens', 'ScreenController@store')->name('screens.store')->middleware('can:create-screens');
     Route::put('screens/{screen}', 'ScreenController@update')->name('screens.update')->middleware('can:edit-screens');
     Route::put('screens/{screen}/duplicate', 'ScreenController@duplicate')->name('screens.duplicate')->middleware('can:create-screens');
@@ -72,8 +76,8 @@ Route::group(
     Route::put('scripts/{script}/duplicate', 'ScriptController@duplicate')->name('scripts.duplicate')->middleware('can:create-scripts');
     Route::delete('scripts/{script}', 'ScriptController@destroy')->name('scripts.destroy')->middleware('can:delete-scripts');
     Route::post('scripts/{script}/preview', 'ScriptController@preview')->name('scripts.preview')->middleware('can:view-scripts');
-    Route::post('scripts/execute/{script_id}/{script_key?}', 'ScriptController@execute')->name('scripts.execute')->middleware('can:view-scripts');
-    Route::get('scripts/execution/{key}', 'ScriptController@execution')->name('scripts.execution')->middleware('can:view-scripts');
+    Route::post('scripts/execute/{script_id}/{script_key?}', 'ScriptController@execute')->name('scripts.execute');
+    Route::get('scripts/execution/{key}', 'ScriptController@execution')->name('scripts.execution');
 
     // Script Categories
     Route::get('script_categories', 'ScriptCategoryController@index')->name('script_categories.index')->middleware('can:view-script-categories');
@@ -87,6 +91,7 @@ Route::group(
     Route::get('processes/{process}', 'ProcessController@show')->name('processes.show')->middleware('can:view-processes');
     Route::post('processes/{process}/export', 'ProcessController@export')->name('processes.export')->middleware('can:export-processes');
     Route::post('processes/import', 'ProcessController@import')->name('processes.import')->middleware('can:import-processes');
+    Route::get('processes/import/{code}/is_ready', 'ProcessController@import_ready')->name('processes.import_is_ready')->middleware('can:import-processes');
     Route::post('processes/{process}/import/assignments', 'ProcessController@importAssignments')->name('processes.import.assignments')->middleware('can:import-processes');
     Route::post('processes', 'ProcessController@store')->name('processes.store')->middleware('can:create-processes');
     Route::put('processes/{process}', 'ProcessController@update')->name('processes.update')->middleware('can:edit-processes');
@@ -111,6 +116,7 @@ Route::group(
     Route::get('tasks', 'TaskController@index')->name('tasks.index'); //Already filtered in controller
     Route::get('tasks/{task}', 'TaskController@show')->name('tasks.show')->middleware('can:view,task');
     Route::put('tasks/{task}', 'TaskController@update')->name('tasks.update')->middleware('can:update,task');
+    Route::get('tasks/{task}/screens/{screen}', 'TaskController@getScreen')->name('tasks.get_screen')->middleware('can:viewScreen,task,screen');
 
     // Requests
     Route::get('requests', 'ProcessRequestController@index')->name('requests.index'); //Already filtered in controller
@@ -120,10 +126,9 @@ Route::group(
     Route::post('requests/{request}/events/{event}', 'ProcessRequestController@activateIntermediateEvent')->name('requests.update,request');
 
     // Request Files
-    Route::get('requests/{request}/files', 'ProcessRequestFileController@index')->name('requests.files.index')->middleware('can:participate,request');
-    Route::get('requests/{request}/files/{file}', 'ProcessRequestFileController@show')->name('requests.files.show')->middleware('can:participate,request');
+    Route::get('requests/{request}/files', 'ProcessRequestFileController@index')->name('requests.files.index')->middleware('can:view,request');
+    Route::get('requests/{request}/files/{file}', 'ProcessRequestFileController@show')->name('requests.files.show')->middleware('can:view,request');
     Route::post('requests/{request}/files', 'ProcessRequestFileController@store')->name('requests.files.store')->middleware('can:participate,request');
-    Route::put('requests/{request}/files/{file}', 'ProcessRequestFileController@update')->name('requests.files.update')->middleware('can:participate,request');
     Route::delete('requests/{request}/files/{file}', 'ProcessRequestFileController@destroy')->name('requests.filesrequests.files.destroy')->middleware('can:participate,request');
 
     // Files
@@ -160,8 +165,11 @@ Route::group(
     Route::delete('comments/{comment}', 'CommentController@destroy')->name('comments.destroy')->middleware('can:delete-comments');
 
     // Global signals
-    Route::get('signals', 'SignalController@index')->name('signals.index')->middleware('can:view-processes');
-    Route::get('signlas/{signalId}', 'SignalController@show')->name('signals.show')->middleware('can:view-processes');
+    Route::get('signals', 'SignalController@index')->name('signals.index')->middleware('can:view-signals');
+    Route::get('signals/{signalId}', 'SignalController@show')->name('signals.show')->middleware('can:view-signals');
+    Route::post('signals', 'SignalController@store')->name('signals.store')->middleware('can:create-signals');
+    Route::put('signals/{signalId}', 'SignalController@update')->name('signals.update')->middleware('can:edit-signals');
+    Route::delete('signals/{signalId}', 'SignalController@destroy')->name('signals.destroy')->middleware('can:delete-signals');
 
     //UI customization
     Route::post('customize-ui', 'CssOverrideController@store')->name('customize-ui.store');
@@ -174,6 +182,17 @@ Route::group(
     Route::post('script-executors/cancel', 'ScriptExecutorController@cancel')->name('script-executors.cancel');
     Route::delete('script-executors/{script_executor}', 'ScriptExecutorController@delete')->name('script-executors.delete');
 
+    // Security logs
+    Route::get('security-logs', 'SecurityLogController@index')->name('security-logs.index')->middleware('can:view-security-logs');
+    Route::get('security-logs/{securityLog}', 'SecurityLogController@show')->name('security-logs.show')->middleware('can:view-security-logs');
+
+    // Settings
+    Route::get('settings', 'SettingController@index')->name('settings.index')->middleware('can:view-settings');
+    Route::get('settings/groups', 'SettingController@groups')->name('settings.groups')->middleware('can:view-settings');
+    Route::post('settings/import', 'SettingController@import')->name('settings.import')->middleware('can:update-settings');
+    Route::put('settings/{setting}', 'SettingController@update')->name('settings.update')->middleware('can:update-settings');
+    Route::get('settings/group/{group}/buttons', 'SettingController@buttons')->name('settings.buttons')->middleware('can:view-settings');
+
     // debugging javascript errors
     Route::post('debug', 'DebugController@store')->name('debug.store')->middleware('throttle');
 
@@ -181,4 +200,6 @@ Route::group(
     Route::fallback(function(){
         return response()->json(['error' => 'Not Found'], 404);
     })->name('fallback');
+
+    Route::get('/test_acknowledgement', [TestStatusController::class, 'testAcknowledgement'])->name('test.acknowledgement');
 });

@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Feature;
+namespace Tests\Feature\Processes;
 
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Http\UploadedFile;
@@ -127,13 +127,15 @@ class ExportImportScreenTest extends TestCase
         $file = new UploadedFile($fileName, 'leave_absence_request.json', null, null, null, true);
 
         // Test to ensure our admin user can import a other file
+        // file type process_package
         $this->user = $adminUser;
         $response = $this->apiCall('POST', '/screens/import', [
             'file' => $file,
         ]);
-        $response->assertStatus(200);
+        $response->assertStatus(422);
+
         //Unable to import the screen.
-        $this->assertFalse($response->json('status'));
+        $this->assertEquals('Invalid Format', $response->json('message'));
     }
 
     public function testImportScreenWithWatchers()
@@ -150,7 +152,40 @@ class ExportImportScreenTest extends TestCase
         ]);
         $response->assertStatus(200);
 
-        //Unable to import the screen.
-        $this->assertFalse($response->json('status')['screens']['success']);
+        //Able to import the screen.
+        $this->assertTrue($response->json('status')['screens']['success']);
+    }
+
+    public function testImportNestedScreen()
+    {
+        // Load the file to test
+        $fileName = __DIR__ . '/../../Fixtures/nested_screens.json';
+        $file = new UploadedFile($fileName, 'nested_screens.json', null, null, null, true);
+
+        // Import the file
+        $response = $this->apiCall('POST', '/screens/import', [
+            'file' => $file,
+        ]);
+
+        // Assert that the import was successful
+        $response->assertStatus(200);
+        $this->assertTrue($response->json('status')['screens']['success']);
+
+        // Find the imported screens
+        $screens = Screen::latest()->take(2)->get();
+        $parent = $screens->where('title', 'Parent Screen')->first();
+        $child = $screens->where('title', 'Child Screen')->first();
+        
+        // Assert that we found our parent & child screens
+        $this->assertNotNull($parent);
+        $this->assertNotNull($child);
+        
+        // Assert that the child screen has been properly referenced in the parent
+        $this->assertArraySubset([
+            'label' => 'Nested Screen',
+            'config' => [
+                'screen' => $child->id,
+            ]
+        ], $parent->config[0]['items'][1]);        
     }
 }

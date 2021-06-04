@@ -7,10 +7,14 @@ import ConfirmationModal from "./components/Confirm";
 import NavbarProfile from "./components/NavbarProfile";
 import Multiselect from "vue-multiselect/src/Multiselect";
 import SelectUser from "./components/SelectUser";
+import SelectUserGroup from "./components/SelectUserGroup";
 import CategorySelect from "./processes/categories/components/CategorySelect";
 import SelectFromApi from "./components/SelectFromApi";
+import Breadcrumbs from "./components/Breadcrumbs";
+import TimelineItem from './components/TimelineItem';
 
 import { FileUpload, FileDownload } from './processes/screen-builder/components'
+import RequiredCheckbox from './processes/screen-builder/components/inspector/RequiredCheckbox'
 
 /******
  * Global adjustment parameters for moment.js.
@@ -19,7 +23,7 @@ import moment from "moment";
 import moment_timezone from "moment-timezone";
 import __ from "./modules/lang";
 
-require("./bootstrap");
+require("bootstrap");
 
 let Vue = window.Vue;
 if (window.ProcessMaker && window.ProcessMaker.user) {
@@ -39,10 +43,14 @@ window.moment = moment;
 Vue.component("multiselect", Multiselect);
 Vue.component("Sidebaricon", Sidebaricon);
 Vue.component("select-user", SelectUser);
+Vue.component("select-user-group", SelectUserGroup);
 Vue.component("category-select", CategorySelect);
 Vue.component("select-from-api", SelectFromApi);
 Vue.component("FileUpload", FileUpload);
 Vue.component("FileDownload", FileDownload);
+Vue.component("RequiredCheckbox", RequiredCheckbox);
+Vue.component("Breadcrumbs", Breadcrumbs);
+Vue.component("timeline-item", TimelineItem);
 
 // Event bus ProcessMaker
 window.ProcessMaker.events = new Vue();
@@ -58,9 +66,25 @@ window.ProcessMaker.nodeTypes.get = function (id) {
 if (document.getElementById("breadcrumbs")) {
   window.ProcessMaker.breadcrumbs = new Vue({
     el: '#breadcrumbs',
-    data() {
+    data () {
       return {
         taskTitle: '',
+      };
+    },
+    methods: {
+      getRoutes() {
+        if (this.$refs.breadcrumbs) {
+          return this.$refs.breadcrumbs.list;
+        } else {
+          return [];
+        }
+      },
+      setRoutes(routes) {
+        if (this.$refs.breadcrumbs) {
+          return this.$refs.breadcrumbs.updateRoutes(routes);
+        } else {
+          return false;
+        }
       }
     }
   });
@@ -181,7 +205,16 @@ window.ProcessMaker.confirmModal = function (title, message, variant, callback) 
   ProcessMaker.navbar.confirmShow = true;
 };
 
+//flags print forms
+window.ProcessMaker.apiClient.requestCount = 0;
+window.ProcessMaker.apiClient.requestCountFlag = false;
+
 window.ProcessMaker.apiClient.interceptors.request.use((request) => {
+  //flags print forms
+  if (window.ProcessMaker.apiClient.requestCountFlag) {
+    window.ProcessMaker.apiClient.requestCount++;
+  }
+
   window.ProcessMaker.EventBus.$emit("api-client-loading", request);
   return request;
 });
@@ -191,10 +224,18 @@ window.ProcessMaker.apiClient.interceptors.response.use((response) => {
   // response.config.method (PUT, POST, DELETE)
   // response.config.url (extract resource name)
   window.ProcessMaker.EventBus.$emit("api-client-done", response);
+  //flags print forms
+  if (window.ProcessMaker.apiClient.requestCountFlag && window.ProcessMaker.apiClient.requestCount > 0) {
+    window.ProcessMaker.apiClient.requestCount--;
+  }
   return response;
 }, (error) => {
     window.ProcessMaker.EventBus.$emit("api-client-error", error);
     if (error.response && error.response.status && error.response.status === 401) {
+        //stop 401 error consuming endpoints with data-sources
+        if (error.config.url.includes('requests/') && error.config.url.includes('/data_sources/')) {
+          return;
+        }
         window.location = "/login";
     } else {
       if (_.has(error, 'config.url') && !error.config.url.match('/debug')) {

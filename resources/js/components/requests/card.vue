@@ -1,6 +1,6 @@
 <template>
     <div class="mt-3">
-      <div class="card" v-for="event in process.startEvents" :key="event.id">
+      <div class="card" v-for="event in emptyStartEvents" :key="event.id">
         <div class="card-body">
           <div class="row">
             <div class="col-10">
@@ -9,8 +9,8 @@
               <a href="#" @click="showRequestDetails">...</a>
             </div>
             <div class="col-2 text-right">
-              <a href="#" @click="newRequestLink(process, event)" class="btn btn-primary btn-sm">
-                <i class="fas fa-caret-square-right"></i> Start
+              <a :href="getNewRequestLinkHref(process, event)" @click.prevent="newRequestLink(process, event);" class="btn btn-primary btn-sm">
+                <i class="fas fa-caret-square-right"></i> {{$t('Start')}}
               </a>
             </div>
           </div>
@@ -51,6 +51,12 @@ export default {
           this.spin = 0;
           var instance = response.data;
           window.location = "/requests/" + instance.id;
+        }).catch((err) => {
+          this.disabled = false;
+          const data = err.response.data;
+          if (data.message) {
+            ProcessMaker.alert(data.message, 'danger');
+          }
         });
     },
     showRequestDetails: function(id) {
@@ -59,9 +65,17 @@ export default {
       } else {
         this.showdetail = false;
       }
+    },
+    getNewRequestLinkHref(process, event) {
+      const id = process.id;
+      const startEventId = event.id;
+      return "/process_events/" + id + "?event=" + startEventId;
     }
   },
   computed: {
+    emptyStartEvents () {
+      return this.process.startEvents.filter(event => !event.eventDefinitions || event.eventDefinitions.length === 0);
+    },
     transformedName() {
       return this.process.name.replace(new RegExp(this.filter, "gi"), match => {
         return match;

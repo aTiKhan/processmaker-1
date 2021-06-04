@@ -2,6 +2,7 @@
     <div class="form-group">
         <label>{{ $t(label) }}</label>
         <multiselect v-model="content"
+                     ref="screen-select"
                      track-by="id"
                      label="title"
                      :class="{'is-invalid':error}"
@@ -27,7 +28,7 @@
         </div>
         <small v-if="helper" class="form-text text-muted">{{ $t(helper) }}</small>
         <a
-                v-if="content.id"
+                v-if="content && content.id"
                 :href="`/designer/screen-builder/${content.id}/edit`"
                 target="_blank"
         >
@@ -58,10 +59,12 @@
         immediate: true,
         handler() {
           this.validate();
+          let selected = ''
           if (this.content) {
             this.error = '';
-            this.$emit('input', this.content.id);
+            selected = this.content.id;
           }
+          this.$emit('input', selected);
         }
       },
       value: {
@@ -96,19 +99,27 @@
         }
         return 'FORM'
       },
+      interactive() {
+        if (this.params && this.params.interactive) {
+          return this.params.interactive;
+        }
+        return false;
+      },
       load(filter) {
         let params = Object.assign(
           {
             type: this.type(),
+            interactive: this.interactive(),
             order_direction: 'asc',
             status: 'active',
+            selectList: true,
             filter: (typeof filter === 'string' ? filter : '')
           },
           this.params
         );
         this.loading = true;
         ProcessMaker.apiClient
-          .get('screens', {
+          .get('screens?exclude=config', {
             params: params
           })
           .then(response => {

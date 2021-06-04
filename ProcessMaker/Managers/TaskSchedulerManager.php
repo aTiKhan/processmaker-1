@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use PDOException;
 use ProcessMaker\Facades\WorkflowManager;
+use ProcessMaker\Jobs\StartEventConditional;
 use ProcessMaker\Models\Process;
 use ProcessMaker\Models\ProcessRequest;
 use ProcessMaker\Models\ScheduledTask;
@@ -109,7 +110,7 @@ class TaskSchedulerManager implements JobManagerInterface, EventBusInterface
         $scheduledTask->process_request_token_id = $token ? $token->id : null;
         $scheduledTask->configuration = json_encode($configuration);
         $scheduledTask->type = $types[get_class($element)];
-        $scheduledTask->last_execution = $this->today()
+        $scheduledTask->last_execution = $token && $token->created_at ? $token->created_at : $this->today()
             ->setTimezone(new DateTimeZone('UTC'))
             ->format('Y-m-d H:i:s');
         $scheduledTask->save();
@@ -258,9 +259,10 @@ class TaskSchedulerManager implements JobManagerInterface, EventBusInterface
         }
 
         $process = Process::find($id);
+        /** @var ProcessRequest $request */
         $request = ProcessRequest::find($task->process_request_id);
 
-        $definitions = $process->getDefinitions();
+        $definitions = $request->getVersionDefinitions();
         if (!$definitions->findElementById($config->element_id)) {
             return;
         }
@@ -525,6 +527,17 @@ class TaskSchedulerManager implements JobManagerInterface, EventBusInterface
     ) {
         if ($token || ($this->registerStartEvents && !$token)) {
             $this->scheduleTask($duration, $element, $token);
+        }
+    }
+
+    /**
+     * Evaluate processes with conditional start events
+     */
+    public function evaluateConditionals()
+    {
+        $processes = Process::where('conditional_events', '!=', '[]')->get();
+        foreach ($processes as $process) {
+            StartEventConditional::dispatchNow($process);
         }
     }
 

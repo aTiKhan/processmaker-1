@@ -14,6 +14,15 @@ use ProcessMaker\Models\Setting;
 
 class CssOverrideController extends Controller
 {
+    /**
+     * A whitelist of attributes that should not be
+     * sanitized by our SanitizeInput middleware.
+     *
+     * @var array
+     */
+    public $doNotSanitize = [
+        'loginFooter'
+    ];
 
     /**
      * Create a new Settings css-override
@@ -23,13 +32,16 @@ class CssOverrideController extends Controller
      * @return ApiResource
      *
      * @OA\Post(
-     *     path="/css_settings",
-     *     summary="Save a new settings css override",
-     *     operationId="createSettingsCss",
-     *     tags={"SettingsCss"},
+     *     path="/customize-ui",
+     *     summary="Create or update a new setting",
+     *     operationId="updateCssSetting",
+     *     tags={"CssSettings"},
      *     @OA\RequestBody(
      *       required=true,
-     *       @OA\JsonContent(ref="#/components/schemas/settingsEditable")
+     *       @OA\JsonContent(
+     *         @OA\Property(property="variables", type="string"),
+     *         @OA\Property(property="sansSerifFont", type="string"),
+     *       )
      *     ),
      *     @OA\Response(
      *         response=201,
@@ -76,47 +88,29 @@ class CssOverrideController extends Controller
         $setting->fill($request->input());
         $setting->saveOrFail();
 
+        $this->setLoginFooter($request);
+
         $this->writeColors(json_decode($request->input('variables', '[]'), true));
         $this->writeFonts(json_decode($request->input("sansSerifFont", '')));
-        $this->compileSass(json_decode($request->input('variables', '[]'), true));
+        $this->compileSass($request->user('api')->id, json_decode($request->input('variables', '[]'), true));
 
         return new ApiResource($setting);
     }
 
-    /**
-     * Update a Setting Css override.
-     *
-     * @param Request $request
-     *
-     * @return ApiResource
-     *
-     * @OA\Put(
-     *     path="/css_settings",
-     *     summary="Update a setting css",
-     *     operationId="updateSettingCss",
-     *     tags={"SettingsCss"},
-     *     @OA\Parameter(
-     *         description="ID of setting to return",
-     *         in="path",
-     *         name="css_override_id",
-     *         required=true,
-     *         @OA\Schema(
-     *           type="string",
-     *         )
-     *     ),
-     *     @OA\RequestBody(
-     *       required=true,
-     *       @OA\JsonContent(ref="#/components/schemas/settingsEditable")
-     *     ),
-     *     @OA\Response(
-     *         response=204,
-     *         description="success",
-     *         @OA\JsonContent(ref="#/components/schemas/settings")
-     *     ),
-     * )
-     * @throws \Throwable
-     *
-     */
+    private function setLoginFooter(Request $request)
+    {
+        $footerContent = $request->input('loginFooter', '');
+        if ($footerContent === "null") {
+            $footerContent = "";
+        }
+
+        Setting::updateOrCreate([
+            'key' => 'login-footer'
+        ], [
+            'config' => ['html' => $footerContent]
+        ]);
+    }
+
     public function update(Request $request)
     {
         if (!Auth::user()->is_administrator) {
@@ -144,7 +138,7 @@ class CssOverrideController extends Controller
 
         $this->writeColors(json_decode($request->input('variables', '[]'), true));
         $this->writeFonts(json_decode($request->input("sansSerifFont", '')));
-        $this->compileSass(json_decode($request->input('variables', '[]'), true));
+        $this->compileSass($request->user('api')->id, json_decode($request->input('variables', '[]'), true));
 
         return response([], 204);
     }
@@ -183,26 +177,26 @@ class CssOverrideController extends Controller
     /**
      * run jobs compile
      */
-    private function compileSass()
+    private function compileSass($userId)
     {
         // Compile the Sass files
         $this->dispatch(new CompileSass([
             'tag' => 'sidebar',
             'origin' => 'resources/sass/sidebar/sidebar.scss',
             'target' => 'public/css/sidebar.css',
-            'user' => Auth::user()->getKey()
+            'user' => $userId
         ]));
         $this->dispatch(new CompileSass([
             'tag' => 'app',
             'origin' => 'resources/sass/app.scss',
             'target' => 'public/css/app.css',
-            'user' => Auth::user()->getKey()
+            'user' => $userId
         ]));
         $this->dispatch(new CompileSass([
             'tag' => 'queues',
             'origin' => 'resources/sass/admin/queues.scss',
             'target' => 'public/css/admin/queues.css',
-            'user' => Auth::user()->getKey()
+            'user' => $userId
         ]));
     }
 

@@ -3,11 +3,14 @@
 namespace ProcessMaker\Models;
 
 use Carbon\Carbon;
+use DB;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\Rule;
+use Laravel\Scout\Searchable;
 use Log;
-use ProcessMaker\Nayra\Bpmn\Models\IntermediateCatchEvent;
-use ProcessMaker\Models\RequestUserPermission;
+use ProcessMaker\Events\ProcessUpdated;
+use ProcessMaker\Exception\PmqlMethodException;
+use ProcessMaker\Managers\DataManager;
 use ProcessMaker\Nayra\Contracts\Bpmn\FlowElementInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\IntermediateCatchEventInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\SignalEventDefinitionInterface;
@@ -15,11 +18,13 @@ use ProcessMaker\Nayra\Contracts\Bpmn\TokenInterface;
 use ProcessMaker\Nayra\Contracts\Engine\ExecutionInstanceInterface;
 use ProcessMaker\Nayra\Engine\ExecutionInstanceTrait;
 use ProcessMaker\Traits\ExtendedPMQL;
+use ProcessMaker\Traits\HideSystemResources;
 use ProcessMaker\Traits\SerializeToIso8601;
 use ProcessMaker\Traits\SqlsrvSupportTrait;
 use Spatie\MediaLibrary\HasMedia\HasMedia;
 use Spatie\MediaLibrary\HasMedia\HasMediaTrait;
 use Throwable;
+use ProcessMaker\Repositories\BpmnDocument;
 
 /**
  * Represents an Eloquent model of a Request which is an instance of a Process.
@@ -37,6 +42,9 @@ use Throwable;
  * @property \Carbon\Carbon $updated_at
  * @property \Carbon\Carbon $created_at
  * @property Process $process
+ * @property ProcessRequestLock[] $locks
+ * @property ProcessRequestToken $ownerTask
+ * @method static ProcessRequest find($id)
  *
  * @OA\Schema(
  *   schema="processRequestEditable",
@@ -61,6 +69,8 @@ use Throwable;
  *           @OA\Property(property="process_category_id", type="string", format="id"),
  *           @OA\Property(property="created_at", type="string", format="date-time"),
  *           @OA\Property(property="updated_at", type="string", format="date-time"),
+ *           @OA\Property(property="user", @OA\Schema(ref="#/components/schemas/users")),
+ *           @OA\Property(property="participants", type="array", @OA\Items(ref="#/components/schemas/users")),
  *      )
  *   },
  * )
@@ -72,6 +82,8 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
     use HasMediaTrait;
     use ExtendedPMQL;
     use SqlsrvSupportTrait;
+    use HideSystemResources;
+    use Searchable;
 
     protected $connection = 'data';
 
@@ -119,6 +131,7 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
         'data' => 'array',
         'errors' => 'array',
         'signal_events' => 'array',
+        'locked_at' => 'datetime:c',
     ];
 
     /**
@@ -131,6 +144,38 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
         'process',
         'participants',
     ];
+
+    /**
+     * Determine whether the item should be indexed.
+     *
+     * @return boolean
+     */
+    public function shouldBeSearchable()
+    {
+        $setting = Setting::byKey('indexed-search');
+        if ($setting && $setting->config['enabled'] === true) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * Get the indexable data array for the model.
+     *
+     * @return array
+     */
+    public function toSearchableArray()
+    {
+        $dataToInclude = $this->data;
+        unset($dataToInclude['_request']);
+        unset($dataToInclude['_user']);
+        return [
+            'id' => $this->id,
+            'name' => $this->name,
+            'data' => json_encode($dataToInclude),
+        ];
+    }
 
     /**
      * Boot the model as a process instance.
@@ -257,6 +302,7 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
         $tokens = $this->tokens()
             ->whereNotIn('element_type', ['startEvent', 'end_event'])
             ->where('status', 'CLOSED')
+            ->orderBy('completed_at')
             ->get();
         $screens = [];
         foreach ($tokens as $token) {
@@ -266,7 +312,8 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
                 if ($screen) {
                     $screen->element_name = $token->element_name;
                     $screen->element_type = $token->element_type;
-                    $screen->data = $token->data;
+                    $dataManager = new DataManager();
+                    $screen->data = $dataManager->getData($token, true);
                     $screen->screen_id = $screen->id;
                     $screen->id = $token->id;
                     $screens[] = $screen;
@@ -325,6 +372,39 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
         return $this->hasMany(ProcessRequestToken::class)
                 ->with('user')
                 ->whereNotIn('element_type', ['scriptTask']);
+    }
+    
+    /**
+     * Filter processes with a string
+     *
+     * @param $query
+     *
+     * @param $filter string
+     */
+    public function scopeFilter($query, $filter)
+    {
+        $setting = Setting::byKey('indexed-search');
+        if ($setting && $setting->config['enabled'] === true) {
+            if (is_numeric($filter)) {
+                $query->whereIn('id', [$filter]);
+            } else {
+                $matches = ProcessRequest::search($filter)->take(10000)->get()->pluck('id');
+                $query->whereIn('id', $matches);            
+            }
+        } else {
+            $filter = '%' . mb_strtolower($filter) . '%';
+            $query->where(function ($query) use ($filter) {
+                $query->where(DB::raw('LOWER(name)'), 'like', $filter)
+                    ->orWhere(DB::raw('LOWER(data)'), 'like', $filter)
+                    ->orWhere(DB::raw('id'), 'like', $filter)
+                    ->orWhere(DB::raw('LOWER(status)'), 'like', $filter)
+                    ->orWhere('initiated_at', 'like', $filter)
+                    ->orWhere('created_at', 'like', $filter)
+                    ->orWhere('updated_at', 'like', $filter);
+            });
+        }
+        
+        return $query;
     }
 
     /**
@@ -397,7 +477,7 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
     {
         $result = [];
         if (is_array($this->data)) {
-            foreach ($this->data as $key => $value) {
+            foreach ($this->getRequestData() as $key => $value) {
                 $result[] = [
                     'key' => $key,
                     'value' => $value
@@ -438,7 +518,10 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
         $errors[] = $error;
         $this->errors = $errors;
         $this->status = 'ERROR';
-        $this->save();
+        \Log::error($exception);
+        if (!$this->isNonPersistent()) {
+            $this->save();
+        }
     }
 
     public function childRequests()
@@ -536,10 +619,9 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
 
         return function ($query) use ($value, $statusMap, $expression) {
             if (array_key_exists($value, $statusMap)) {
-                $query->where('status', $expression->operator, $statusMap[$value]);
-            } else {
-                $query->where('status', $value);
+                $value = $statusMap[$value];
             }
+            $query->where('status', $expression->operator, $value);
         };
     }
 
@@ -553,11 +635,15 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
     private function valueAliasRequester($value, $expression)
     {
         $user = User::where('username', $value)->get()->first();
-        $requests = ProcessRequest::where('user_id', $expression->operator,$user->id)->get();
 
-        return function ($query) use ($requests) {
-            $query->whereIn('id', $requests->pluck('id'));
-        };
+        if ($user) {
+            $requests = ProcessRequest::where('user_id', $expression->operator, $user->id)->get();
+            return function ($query) use ($requests) {
+                $query->whereIn('id', $requests->pluck('id'));
+            };
+        } else {
+            throw new PmqlMethodException('requester', 'The specified requester username does not exist.');
+        }
     }
 
     /**
@@ -570,11 +656,16 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
     private function valueAliasParticipant($value, $expression)
     {
         $user = User::where('username', $value)->get()->first();
-        $tokens = ProcessRequestToken::where('user_id', $expression->operator, $user->id)->get();
 
-        return function ($query) use ($tokens) {
-            $query->whereIn('id', $tokens->pluck('process_request_id'));
-        };
+        if ($user) {
+            $tokens = ProcessRequestToken::where('user_id', $expression->operator, $user->id)->get();
+
+            return function ($query) use ($tokens) {
+                $query->whereIn('id', $tokens->pluck('process_request_id'));
+            };
+        } else {
+            throw new PmqlMethodException('participant', 'The specified participant username does not exist.');
+        }
     }
 
     /**
@@ -606,6 +697,9 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
      */
     public function scopeRequestsThatUserCan($query, $permission, User $user)
     {
+        if ($permission === 'can_view' && $user->can('view-all_requests')) {
+            return $query;
+        }
         $query->whereHas('userPermissions', function ($query) use ($permission, $user) {
             $query->where('user_id', $user->getKey());
             $query->where($permission, true);
@@ -621,18 +715,147 @@ class ProcessRequest extends Model implements ExecutionInstanceInterface, HasMed
      */
     public function updateCatchEvents()
     {
-       $signalEvents = [];
-       foreach ($this->tokens as $token) {
-           $element = $token->getDefinition(true);
-           if ($element instanceof IntermediateCatchEventInterface) {
-               foreach ($element->getEventDefinitions() as $eventDefinition) {
-                   if ($eventDefinition instanceof SignalEventDefinitionInterface) {
-                       $signalEvents[]= $eventDefinition->getProperty('signal')->getId();
-                   }
-               }
-           }
-       }
-       $this->signal_events = $signalEvents;
-       $this->save();
+        $signalEvents = [];
+        foreach ($this->tokens as $token) {
+            $element = $token->getDefinition(true, $this->tokens->toArray());
+            if ($element instanceof IntermediateCatchEventInterface) {
+                foreach ($element->getEventDefinitions() as $eventDefinition) {
+                    if ($eventDefinition instanceof SignalEventDefinitionInterface) {
+                        $signal = $eventDefinition->getProperty('signal');
+                        if ($signal) {
+                            $signalEvents[]= $signal->getId();
+                        }
+                    }
+                }
+            }
+        }
+        $this->signal_events = $signalEvents;
+        $this->save();
+    }
+
+    /**
+     * Update and merge with the latest stored data
+     *
+     * @return array
+     */
+    public function mergeLatestStoredData()
+    {
+        $store = $this->getDataStore();
+        $latest = ProcessRequest::find($this->getId());
+        $this->data = $store->updateArray($latest->data);
+        return $this->data;
+    }
+
+    /**
+     * Locks required to the request
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany
+     */
+    public function locks()
+    {
+        return $this->hasMany(ProcessRequestLock::class);
+    }
+
+    /**
+     * Request a lock
+     *
+     * @param int $tokenId
+     *
+     * @return ProcessRequestLock
+     */
+    public function lock($tokenId)
+    {
+        return $this->locks()->create(['process_request_token_id' => $tokenId]);
+    }
+
+    public function unlock()
+    {
+        $first = $this->locks()->orderBy('id')->first();
+        if ($first) {
+            $first->delete();
+        }
+    }
+
+    public function hasLock(ProcessRequestLock $lock)
+    {
+        $first = $this->locks()->orderBy('id')->first();
+        return !$first || $first->getKey() === $lock->getKey();
+    }
+
+    /**
+     * Returns true if the request persists
+     *
+     * @return boolean
+     */
+    public function isNonPersistent()
+    {
+        return $this->getProcess()->isNonPersistent();
+    }
+
+    /**
+     * Get managed data from the process request
+     *
+     * @return array
+     */
+    public function getRequestData()
+    {
+        $dataManager = new DataManager();
+        return $dataManager->getRequestData($this);
+    }
+
+    /**
+     * @return self
+     */
+    public function loadProcessRequestInstance()
+    {
+        $process = $this->processVersion ?? $this->processVersion()->first() ?? $this->process ?? $this->process()->first();
+        $storage = $process->getDefinitions();
+        $callableId = $this->callable_id;
+        $process = $storage->getProcess($callableId);
+        $dataStore = $storage->getFactory()->createDataStore();
+        $dataStore->setData($this->data);
+        $this->setId($this->getKey());
+        $this->setProcess($process);
+        $this->setDataStore($dataStore);
+        return $this;
+    }
+
+    /**
+     * Get the BPMN definitions version of the process that is running.
+     *
+     * @param boolean $forceParse
+     * @param mixed $engine
+     *
+     * @return BpmnDocument
+     */
+    public function getVersionDefinitions($forceParse = false, $engine = null)
+    {
+        $processVersion = $this->processVersion ?: $this->process;
+        return $processVersion->getDefinitions($forceParse, $engine);
+    }
+
+    /**
+     * Notify a process update
+     *
+     * @param string $eventName
+     */
+    public function notifyProcessUpdated($eventName)
+    {
+        $event = new ProcessUpdated($this, $eventName);
+        event($event);
+        if ($this->parentRequest) {
+            $this->parentRequest->notifyProcessUpdated($eventName);
+            event($event);
+        }
+    }
+
+    /**
+     * Owner task of the sub process
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasOne
+     */
+    public function ownerTask()
+    {
+        return $this->hasOne(ProcessRequestToken::class, 'subprocess_request_id', 'id');
     }
 }

@@ -13,6 +13,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use ProcessMaker\Managers\ExportManager;
+use ProcessMaker\Models\AnonymousUser;
 use ProcessMaker\Providers\WorkflowServiceProvider;
 
 class ExportProcess implements ShouldQueue
@@ -57,7 +58,7 @@ class ExportProcess implements ShouldQueue
     /**
      * @var ExportManager
      */
-    private $manager;
+    public $manager;
 
 
     /**
@@ -82,22 +83,49 @@ class ExportProcess implements ShouldQueue
     private function removeAssignedEntities()
     {
         $humanTasks = ['startEvent', 'task', 'userTask', 'manualTask'];
+        $ns = WorkflowServiceProvider::PROCESS_MAKER_NS;
+
         foreach ($humanTasks as $humanTask) {
             $tasks = $this->definitions->getElementsByTagName($humanTask);
             foreach ($tasks as $task) {
-                $task->removeAttributeNS(WorkflowServiceProvider::PROCESS_MAKER_NS, 'assignment');
-                $task->removeAttributeNS(WorkflowServiceProvider::PROCESS_MAKER_NS, 'assignedUsers');
-                $task->removeAttributeNS(WorkflowServiceProvider::PROCESS_MAKER_NS, 'assignedGroups');
+                if ($this->assignedToAnonymous($task)) {
+                    // Do not remove the anonymous user association. It will be
+                    // updated when importing.
+                    continue;
+                }
+                
+                // Only remove user/group assignments
+                $assignment = $task->getAttributeNS($ns, 'assignment');
+                if (in_array($assignment, ['user', 'group', 'user_group'])) {
+                    $task->removeAttributeNS($ns, 'assignment');
+                }
+                $task->removeAttributeNS($ns, 'assignedUsers');
+                $task->removeAttributeNS($ns, 'assignedGroups');
             }
         }
 
         //remove assignments to call Activity
-        $callActivity = $this->definitions->getElementsByTagName('callActivity');
-        foreach ($callActivity as $task) {
-            $task->removeAttribute('calledElement');
+        $callActivities = $this->definitions->getElementsByTagName('callActivity');
+        foreach ($callActivities as $task) {
+            $callActivity = $task->getBPMNElementInstance();
+            $external = $callActivity->isFromExternalDefinition();
+            $service = $callActivity->isServiceSubProcess();
+            if ($external && !$service) {
+                $task->removeAttribute('calledElement');
+            }
         }
 
         $this->process->bpmn = $this->definitions->saveXML();
+    }
+
+    private function assignedToAnonymous($task)
+    {
+        $ns = WorkflowServiceProvider::PROCESS_MAKER_NS;
+        $assignment = $task->getAttributeNS($ns, 'assignment');
+        $assignedUsers = $task->getAttributeNS($ns, 'assignedUsers');
+
+        return in_array($assignment, ['user', 'user_group']) &&
+               $assignedUsers === (string) app(AnonymousUser::class)->id;
     }
 
     /**
@@ -110,6 +138,7 @@ class ExportProcess implements ShouldQueue
     {
         $this->package['process'] = $this->process->append('notifications', 'task_notifications')->toArray();
         $this->package['process']['bpmn'] = $this->process->bpmn;
+        $this->package['process']['anonymousUserId'] = app(AnonymousUser::class)->id;
     }
 
     /**
@@ -127,21 +156,30 @@ class ExportProcess implements ShouldQueue
      *
      * @return void
      */
-    private function packageScreens()
+    public function packageScreens()
     {
         $this->package['screens'] = [];
         $this->package['screen_categories'] = [];
 
-        $screenIds = $this->manager->getDependenciesOfType(Screen::class, $this->process, []);
+        if (! isset($this->screen)) {
+            $screenIds = $this->manager->getDependenciesOfType(Screen::class, $this->process, []);
+        } else {
+            $screenIds = array_merge([$this->screen->id], $this->manager->getDependenciesOfType(Screen::class, $this->screen, []));
+        }
 
         if (count($screenIds)) {
             $screens = Screen::whereIn('id', $screenIds)->get();
             $screens->each(function ($screen) {
-                $screenArray = $screen->toArray();
-                $screenArray['categories'] = $screen->categories->toArray();
-                $this->package['screens'][] = $screenArray;
+                $this->packageScreen($screen);
             });
         }
+    }
+
+    private function packageScreen(Screen $screen)
+    {
+        $screenArray = $screen->toArray();
+        $screenArray['categories'] = $screen->categories->toArray();
+        $this->package['screens'][] = $screenArray;
     }
 
     /**
@@ -149,11 +187,16 @@ class ExportProcess implements ShouldQueue
      *
      * @return void
      */
-    private function packageScripts()
+    public function packageScripts()
     {
         $this->package['scripts'] = [];
 
-        $scriptIds = $this->manager->getDependenciesOfType(Script::class, $this->process, []);
+        if (! isset($this->screen)) {
+             $scriptIds = $this->manager->getDependenciesOfType(Script::class, $this->process, []);
+        } else {
+            $scriptIds = $this->manager->getDependenciesOfType(Script::class, $this->screen, []);
+        }
+        
         if (count($scriptIds)) {
             $scripts = Script::whereIn('id', $scriptIds)->get();
 

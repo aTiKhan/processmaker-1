@@ -19,12 +19,39 @@
             <b-alert v-for="(item, index) in alerts" :key="index" class="d-none d-lg-block alertBox" :show="item.alertShow" :variant="item.alertVariant" dismissible fade @dismissed="alertDismissed(item)" @dismiss-count-down="alertDownChanged($event, item)" style="white-space:pre-line">@{{item.alertText}}</b-alert>
         </div>
 
+        @php
+            $menuItems = [];
+            $existsMenuProvider = Menu::get('customtopnav') !== null;
+            $customNav = $existsMenuProvider ? Menu::get('customtopnav')->items->all() : [];
+            $defaultNav = Menu::get('topnav')->items->all();
+            foreach(array_merge($customNav, $defaultNav) as $item) {
+                $newItem = (array) $item;
+                $newItem['link'] = $item->url();
+                $itemsInCustom = array_filter($customNav, function ($el) use($item) {
+                    return $el === $item;
+                });
+                $newItem['isCustom'] = count($itemsInCustom) > 0;
+                $menuItems[] = $newItem;
+            }
+            // If a menu provider is installed, remove menu items from ProcessMaker but preserve any other (from packages, for example)
+            if ($existsMenuProvider) {
+                $menuItems = array_filter($menuItems, function ($item) use($customNav) {
+                    $itemRoute = Route::getRoutes()->match(Request::create($item['link']));
+                    $isCoreLink =  !$itemRoute->isFallBack && isset($itemRoute->action['controller']) && strpos($itemRoute->action['controller'], "ProcessMaker\\Http\\") === 0;
+                    return !$isCoreLink || $item['isCustom'];
+                });
+            }
+        @endphp
+
         <b-navbar-nav class="d-flex align-items-center">
-            @foreach(Menu::get('topnav')->items as $item)
-                <b-nav-item href="{{ $item->url() }}" {{$item->isActive !== false ? 'active': ''}}>
-                    {{$item->title}}
+                <b-nav-item v-for="item in {{ json_encode ($menuItems) }}"
+                            :href="item.link"
+                            :link-classes="item.attributes.class_link"
+                            :target="item.attributes.target"
+                            :active="item.isActive"
+                >
+                    <span v-html="item.title"></span>
                 </b-nav-item>
-            @endforeach
         </b-navbar-nav>
 
         <b-navbar-nav class="d-flex align-items-center ml-auto">
@@ -32,10 +59,12 @@
                 <component id="navbar-request-button" v-bind:is="'request-modal'" url="{{ route('processes.index') }}" v-bind:permission="{{ \Auth::user()->hasPermissionsFor('processes') }}"></component>
             </b-nav-item>
 
-            <b-nav-item class="d-none d-lg-block">
-                <notifications id="navbar-notifications-button" v-bind:is="'notifications'" v-bind:messages="messages">
-                </notifications>
-            </b-nav-item>
+            @can('view-notifications')
+                <b-nav-item class="d-none d-lg-block">
+                    <notifications id="navbar-notifications-button" v-bind:is="'notifications'" v-bind:messages="messages">
+                    </notifications>
+                </b-nav-item>
+            @endcan
             <li class="separator d-none d-lg-block"></li>
             <li class="d-none d-lg-block">
                 @php

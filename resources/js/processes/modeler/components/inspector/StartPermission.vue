@@ -3,6 +3,7 @@
         <div class="form-group">
             <label>{{ $t('Type') }}</label>
             <select class="form-control"
+                    :disabled="disabled"
                     :value="assignmentGetter"
                     @input="assignmentSetter">
                 <option value="">{{ $t('Select...') }}</option>
@@ -26,7 +27,8 @@
                          :searchable="true"
                          :internal-search="false"
                          @open="load"
-                         @search-change="load">
+                         @search-change="load"
+                         :disabled="disabled">
                 <template slot="noResult" >
                     {{ $t('No elements found. Consider changing the search query.') }}
                 </template>
@@ -50,6 +52,7 @@
         loading: false,
         error: '',
         type: '',
+        disabled: false,
       };
     },
     watch: {
@@ -74,7 +77,7 @@
         return this.type === 'user' ? this.userHelper : this.groupHelper;
       },
       assignmentGetter() {
-        const node = this.$parent.$parent.$parent.$parent.highlightedNode.definition;
+        const node = this.$root.$children[0].$refs.modeler.highlightedNode.definition;
         const value = _.get(node, "assignment");
         this.type = value;
         return value;
@@ -92,7 +95,7 @@
       loadUsers(filter) {
         this.loading = true;
         ProcessMaker.apiClient
-          .get("users?order_direction=asc&status=active" + (typeof filter === 'string' ? '&filter=' + filter : ''))
+          .get("users?order_direction=asc" + (typeof filter === 'string' ? '&filter=' + filter : ''))
           .then(response => {
             this.loading = false;
             this.options = response.data.data.map(item => {
@@ -124,7 +127,7 @@
           });
       },
       loadAssigned() {
-        let node = this.$parent.$parent.$parent.$parent.highlightedNode.definition;
+        let node = this.$root.$children[0].$refs.modeler.highlightedNode.definition;
         let value = _.get(node, "assignment");
         this.type = value;
         this.content = null;
@@ -176,14 +179,14 @@
       },
 
       assignedUserSetter(id) {
-        let node = this.$parent.$parent.$parent.$parent.highlightedNode.definition;
+        let node = this.$root.$children[0].$refs.modeler.highlightedNode.definition;
         let value = _.get(node, "assignedUsers");
         this.$set(node, "assignedUsers", id);
         value = _.get(node, "assignedGroups");
         this.$set(node, "assignedGroups", '');
       },
       assignedGroupSetter(id) {
-        let node = this.$parent.$parent.$parent.$parent.highlightedNode.definition;
+        let node = this.$root.$children[0].$refs.modeler.highlightedNode.definition;
         let value = _.get(node, "assignedUsers");
         this.$set(node, "assignedUsers", '');
         value = _.get(node, "assignedGroups");
@@ -192,13 +195,17 @@
       assignmentSetter(event) {
         this.type = event.target.value;
         this.content = null;
-        let node = this.$parent.$parent.$parent.$parent.highlightedNode.definition;
+        let node = this.$root.$children[0].$refs.modeler.highlightedNode.definition;
         this.$set(node, "assignment", this.type);
         this.load();
       },
     },
     mounted() {
       this.loadAssigned();
+
+      this.$root.$on('disable-assignment-settings', (val) => {
+        this.disabled = val;
+      });
     },
   };
 </script>

@@ -11,12 +11,16 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Mustache_Engine;
 use ProcessMaker\AssignmentRules\PreviousTaskAssignee;
+use ProcessMaker\BpmnEngine;
 use ProcessMaker\Contracts\ProcessModelInterface;
 use ProcessMaker\Exception\InvalidUserAssignmentException;
 use ProcessMaker\Exception\TaskDoesNotHaveRequesterException;
 use ProcessMaker\Exception\TaskDoesNotHaveUsersException;
+use ProcessMaker\Exception\UserOrGroupAssignmentEmptyException;
+use ProcessMaker\Facades\WorkflowManager;
+use ProcessMaker\Managers\DataManager;
+use ProcessMaker\Nayra\Bpmn\Models\Activity;
 use ProcessMaker\Nayra\Contracts\Bpmn\ActivityInterface;
-use ProcessMaker\Nayra\Contracts\Bpmn\ProcessInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\ScriptTaskInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\ServiceTaskInterface;
 use ProcessMaker\Nayra\Contracts\Storage\BpmnDocumentInterface;
@@ -33,6 +37,7 @@ use ProcessMaker\Traits\ProcessTrait;
 use ProcessMaker\Traits\SerializeToIso8601;
 use Spatie\MediaLibrary\HasMedia\HasMedia;
 use Spatie\MediaLibrary\HasMedia\HasMediaTrait;
+use Throwable;
 
 /**
  * Represents a business process definition.
@@ -44,30 +49,41 @@ use Spatie\MediaLibrary\HasMedia\HasMediaTrait;
  * @property string $description
  * @property string $name
  * @property string $status
- * @property string start_events
+ * @property array start_events
  * @property \Carbon\Carbon $updated_at
  * @property \Carbon\Carbon $created_at
  *
  * @OA\Schema(
  *   schema="ProcessEditable",
- *   @OA\Property(property="process_category_id", type="string", format="id"),
+ *   @OA\Property(property="process_category_id", type="integer", format="id"),
  *   @OA\Property(property="name", type="string"),
  *   @OA\Property(property="description", type="string"),
  *   @OA\Property(property="status", type="string", enum={"ACTIVE", "INACTIVE"}),
  *   @OA\Property(property="pause_timer_start", type="integer"),
  *   @OA\Property(property="cancel_screen_id", type="integer"),
  *   @OA\Property(property="has_timer_start_events", type="boolean"),
+ *   @OA\Property(property="request_detail_screen_id", type="integer", format="id"),
+ *   @OA\Property(property="is_valid", type="integer"),
+ *   @OA\Property(property="package_key", type="string"),
+ *   @OA\Property(property="start_events", type="array", @OA\Items(ref="#/components/schemas/ProcessStartEvents")),
+ *   @OA\Property(property="warnings", type="string"),
+ *   @OA\Property(property="self_service_tasks", type="array", @OA\Items(type="object")),
+ *   @OA\Property(property="signal_events", type="array", @OA\Items(type="object")),
+ *   @OA\Property(property="category", @OA\Schema(ref="#/components/schemas/ProcessCategory")),
+ *
  * ),
  * @OA\Schema(
  *   schema="Process",
  *   allOf={
  *       @OA\Schema(ref="#/components/schemas/ProcessEditable"),
  *       @OA\Schema(
- *           @OA\Property(property="user_id", type="string", format="id"),
+ *           @OA\Property(property="user_id", type="integer", format="id"),
  *           @OA\Property(property="id", type="string", format="id"),
  *           @OA\Property(property="deleted_at", type="string", format="date-time"),
  *           @OA\Property(property="created_at", type="string", format="date-time"),
  *           @OA\Property(property="updated_at", type="string", format="date-time"),
+ *           @OA\Property(property="notifications", type="object"),
+ *           @OA\Property(property="task_notifications", type="object"),
  *       )
  *   }
  * ),
@@ -88,11 +104,6 @@ use Spatie\MediaLibrary\HasMedia\HasMediaTrait;
  *         @OA\Schema(ref="#/components/schemas/Process"),
  *         @OA\Schema(
  *         @OA\Property(
- *             property="startEvents",
- *             type="array",
- *             @OA\Items(ref="#/components/schemas/ProcessStartEvents"),
- *         ),
- *         @OA\Property(
  *             property="events",
  *             type="array",
  *             @OA\Items(ref="#/components/schemas/ProcessStartEvents"),
@@ -105,21 +116,17 @@ use Spatie\MediaLibrary\HasMedia\HasMediaTrait;
  *     allOf={
  *      @OA\Schema(ref="#/components/schemas/ProcessEditable"),
  *      @OA\Schema(
- *         @OA\Property( property="status", type="object"),
- *         @OA\Property( property="assignable", type="array", @OA\Items(type="string") )
+ *         @OA\Property(property="status", type="array", @OA\Items(type="object")),
+ *         @OA\Property(property="assignable", type="array", @OA\Items(type="object")),
+ *         @OA\Property(property="process", @OA\Schema(ref="#/components/schemas/Process"))
  *      )
  *    }
  * ),
- *
  * @OA\Schema(
- *   schema="CreateNewProcess",
- *   allOf={
- *       @OA\Schema(ref="#/components/schemas/ProcessEditable"),
- *       @OA\Schema(ref="#/components/schemas/Process"),
- *       @OA\Schema(
- *           @OA\Property(property="notifications", type="array", @OA\Items(type="string")),
- *       )
- *   }
+ *     schema="ProcessAssignments",
+ *     @OA\Property(property="assignable", type="array", @OA\Items(type="object")),
+ *     @OA\Property(property="cancel_request", type="object"),
+ *     @OA\Property(property="edit_data", type="object"),
  * )
  */
 class Process extends Model implements HasMedia, ProcessModelInterface
@@ -138,6 +145,7 @@ class Process extends Model implements HasMedia, ProcessModelInterface
     use ProcessTrait;
 
     const categoryClass = ProcessCategory::class;
+    const ASSIGNMENT_PROCESS = 'Assignment process';
 
     protected $connection = 'processmaker';
 
@@ -209,6 +217,7 @@ class Process extends Model implements HasMedia, ProcessModelInterface
         'warnings' => 'array',
         'self_service_tasks' => 'array',
         'signal_events' => 'array',
+        'conditional_events' => 'array',
     ];
 
     /**
@@ -479,12 +488,14 @@ class Process extends Model implements HasMedia, ProcessModelInterface
         || $activity instanceof ServiceTaskInterface ? 'script' : 'requester';
         $assignmentType = $activity->getProperty('assignment', $default);
 
-        $userByRule = $this->getNextUserByRule($activity, $token);
-        if ($userByRule !== null) {
-            return $userByRule;
+        if ($assignmentType === 'rule_expression') {
+            $userByRule = $this->getNextUserByRule($activity, $token);
+            if ($userByRule !== null) {
+                return $userByRule;
+            }
         }
 
-        $definitions = $token->getInstance()->process->getDefinitions();
+        $definitions = $token->getInstance()->getVersionDefinitions();
         $properties = $definitions->findElementById($activity->getId())->getBpmnElementInstance()->getProperties();
         $assignmentLock = array_key_exists('assignmentLock', $properties) ? $properties['assignmentLock']  : false;
 
@@ -507,7 +518,7 @@ class Process extends Model implements HasMedia, ProcessModelInterface
                 $user = $this->getNextUserFromVariable($activity, $token);
                 break;
             case 'requester':
-                $user = $this->getRequester($token);
+                $user = $this->getRequester($activity, $token);
                 break;
             case 'previous_task_assignee':
                 $rule = new PreviousTaskAssignee();
@@ -520,6 +531,17 @@ class Process extends Model implements HasMedia, ProcessModelInterface
             case 'script':
             default:
                 $user = null;
+        }
+        if ($user) {
+            $assignmentProcesss = Process::where('name', Process::ASSIGNMENT_PROCESS)->first();
+            if ($assignmentProcesss) {
+                $res = WorkflowManager::runProcess($assignmentProcesss, 'assign', [
+                    'user_id' => $user,
+                    'process_id' => $this->id,
+                    'request_id' => $token->getInstance()->getId(),
+                ]);
+                $user = $res['assign_to'];
+            }
         }
         return $user ? User::where('id', $user)->first() : null;
     }
@@ -536,7 +558,9 @@ class Process extends Model implements HasMedia, ProcessModelInterface
     private function getNextUserFromVariable($activity, $token)
     {
         $userExpression = $activity->getProperty('assignedUsers');
-        $instanceData = $token->getInstance()->getDataStore()->getData();
+
+        $dataManager = new DataManager();
+        $instanceData = $dataManager->getData($token);
 
         $mustache = new Mustache_Engine();
         $userId = $mustache->render($userExpression, $instanceData);
@@ -567,7 +591,7 @@ class Process extends Model implements HasMedia, ProcessModelInterface
             $users = $this->getAssignableUsers($processTaskUuid);
         }
         if (empty($users)) {
-            throw new TaskDoesNotHaveUsersException($processTaskUuid);
+            throw new UserOrGroupAssignmentEmptyException($processTaskUuid);
         }
         sort($users);
         if ($last) {
@@ -644,6 +668,7 @@ class Process extends Model implements HasMedia, ProcessModelInterface
         $assignmentRules = $activity->getProperty('assignmentRules', null);
 
         $instanceData = $token->getInstance()->getDataStore()->getData();
+
         if ($assignmentRules && $instanceData) {
             $list = json_decode($assignmentRules);
             $list = ($list === null) ? [] : $list;
@@ -678,7 +703,7 @@ class Process extends Model implements HasMedia, ProcessModelInterface
                             $user = $item->assignee;
                             break;
                         case 'requester':
-                            $user = $this->getRequester($token);
+                            $user = $this->getRequester($activity, $token);
                             break;
                         case 'manual':
                         case 'self_service':
@@ -749,6 +774,31 @@ class Process extends Model implements HasMedia, ProcessModelInterface
     }
 
     /**
+     * Check if the user belongs to the group
+     */
+    private function doesUserBelongsGroup($userId, $groupId)
+    {
+        $isMember = GroupMember::where('group_id', $groupId)
+            ->where('member_type', User::class)
+            ->where('member_id', $userId)
+            ->first();
+        if ($isMember) {
+            return true;
+        } else {
+            $groupMembers = GroupMember::where('group_id', $groupId)
+                ->where('member_type', Group::class)
+                ->get();
+            foreach ($groupMembers as $groupMember) {
+                $belongs = $this->doesUserBelongsGroup($userId, $groupMember->member_id);
+                if ($belongs) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * Get a list of the process start events.
      *
      * @return array
@@ -756,16 +806,32 @@ class Process extends Model implements HasMedia, ProcessModelInterface
     public function getStartEvents($filterWithPermissions = false)
     {
         $user = Auth::user();
-        $isAdmin = $user ? $user->is_administrator : false;
-        $permissions = $filterWithPermissions && !$isAdmin ? $this->getStartEventPermissions() : [];
-        $nofilter = $isAdmin || !$filterWithPermissions;
-        $response = [];
+        // Load Process Start Events
         if (!isset($this->start_events)) {
             $this->start_events = $this->getUpdatedStartEvents();
         }
+        // If user is administrator heshe can access all the start events
+        if (!$filterWithPermissions || $user->is_administrator) {
+            return $this->start_events;
+        }
+        // Filter the start events assigned to the user
+        $response = [];
         foreach ($this->start_events as $startEvent) {
-            $id = $startEvent['id'];
-            if ($nofilter || ($user && isset($permissions[$id]) && in_array($user->id, $permissions[$id]))) {
+            if (isset($startEvent['assignment']) && $startEvent['assignment'] === 'user') {
+                $users = explode(',', $startEvent['assignedUsers']);
+                $access = in_array($user->id, $users);
+            } elseif (isset($startEvent['assignment']) && $startEvent['assignment'] === 'group') {
+                $access = false;
+                foreach (explode(',', $startEvent['assignedGroups']) as $groupId) {
+                    $access = $this->doesUserBelongsGroup($user->id, $groupId);
+                    if ($access) {
+                        break;
+                    }
+                }
+            } else {
+                $access = false;
+            }
+            if ($access) {
                 $response[] = $startEvent;
             }
         }
@@ -847,9 +913,10 @@ class Process extends Model implements HasMedia, ProcessModelInterface
      *
      * @return array
      */
-    private function getStartEventPermissions()
+    private function getStartEventPermissions(User $user)
     {
         $permissions = [];
+
         foreach ($this->usersCanStart()->withPivot('node')->get() as $user) {
             $permissions[$user->pivot->node][$user->id] = $user->id;
         }
@@ -911,26 +978,19 @@ class Process extends Model implements HasMedia, ProcessModelInterface
     /**
      * Get the requester of the current token
      *
-     * @param string $processTaskUuid
+     * @param $token
+     * @param $activity
      *
-     * @return Integer $user_id
+     * @return Integer|null $user_id
      * @throws TaskDoesNotHaveRequesterException
      */
-    private function getRequester($token)
+    private function getRequester($activity, $token)
     {
         $processRequest = $token->getInstance();
 
-        // Check for anonymous web entry
-        $startEvent = $processRequest->tokens()->where('element_type', 'startEvent')->firstOrFail();
-        $canBeAnonymous = false;
-        if (isset($startEvent->getDefinition()['config'])) {
-            $config = json_decode($startEvent->getDefinition()['config'], true);
-            if ($config && $config['web_entry'] && $config['web_entry']['mode'] === 'ANONYMOUS') {
-                $canBeAnonymous = true;
-            }
-        }
+        $validateUserId = $activity instanceof Activity;
 
-        if (!$processRequest->user_id && !$canBeAnonymous) {
+        if ($validateUserId  && !$processRequest->user_id) {
             throw new TaskDoesNotHaveRequesterException();
         }
 
@@ -1112,5 +1172,48 @@ class Process extends Model implements HasMedia, ProcessModelInterface
         $signalReferences = $signalEventDefinitions->pluck('signalRef')->unique();
 
         return $signalReferences->toArray();
+    }
+
+    /**
+     * Get the unique Conditional Start Events.
+     *
+     * @return array
+     */
+    public function getUpdatedConditionalStartEvents()
+    {
+        return collect($this->start_events)->filter(function ($startEvent) {
+            return collect($startEvent['eventDefinitions'])->search(function ($event) {
+                return $event['$type'] === 'conditionalEventDefinition';
+            }) !== false;
+        })->pluck('id');
+    }
+
+    /**
+     * Check if the process is properly defined to run.
+     *
+     * @return bool
+     */
+    public function validateBpmnDefinition($addWarnings = false, &$warning = [])
+    {
+        try {
+            $definitions = $this->getDefinitions();
+            $engine = app(BpmnEngine::class, ['definitions' => $definitions]);
+            $processes = $definitions->getElementsByTagNameNS(BpmnDocument::BPMN_MODEL, 'process');
+            foreach ($processes as $process) {
+                $process->getBpmnElementInstance()->getTransitions($engine->getRepository());
+            }
+        } catch (Throwable $exception) {
+            $warning = [
+                'title' => __('Invalid process'),
+                'text' => __('Check the process design'),
+            ];
+            if ($addWarnings) {
+                $warnings = $this->warnings;
+                $warnings[] = $warning;
+                $this->warnings = $warnings;
+            }
+            return false;
+        }
+        return true;
     }
 }

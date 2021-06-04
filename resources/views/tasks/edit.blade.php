@@ -22,7 +22,7 @@
             return ['To Do Tasks', route('tasks.index')];
         },
         $task->processRequest->name =>
-            Auth::user()->can('view', $task->processRequest) ? route('requests.show', ['id' => $task->processRequest->id]) : null,
+            Auth::user()->can('view', $task->processRequest) ? route('requests.show', ['request' => $task->processRequest->id]) : null,
         '@{{taskTitle}}' => null,
       ], 'attributes' => 'v-cloak'])
 @endsection
@@ -34,7 +34,7 @@
                     <button type="button" class="btn btn-primary" @click="claimTask">{{__('Claim Task')}}</button>
                     {{__('This task is unassigned, click Claim Task to assign yourself.')}}
                 </div>
-                <div v-else class="container-fluid h-100 d-flex flex-column">
+                <div class="container-fluid h-100 d-flex flex-column">
                     @can('editData', $task->processRequest)
                         <ul v-if="task.process_request.status === 'ACTIVE'" id="tabHeader" role="tablist" class="nav nav-tabs">
                             <li class="nav-item"><a id="pending-tab" data-toggle="tab" href="#tab-form" role="tab"
@@ -48,68 +48,33 @@
                     @endcan
                     <div id="tabContent" class="tab-content flex-grow-1">
                         <div id="tab-form" role="tabpanel" aria-labelledby="tab-form" class="tab-pane active show h-100">
-                            <template v-if="taskIsOpenOrOverdue">
-                                <div class="card card-body border-top-0 h-100">
-                                    <template v-if="task.component">
-                                        <component
-                                            :is="task.component"
-                                            ref="taskScreen"
-                                            :process-id="task.process_id"
-                                            :instance-id="task.process_request_id"
-                                            :token-id="task.id"
-                                            :screen="task.screen.config"
-                                            :csrf-token="'{{ csrf_token() }}'"
-                                            :computed="task.screen.computed"
-                                            :custom-css="task.screen.custom_css"
-                                            :watchers="task.screen.watchers"
-                                            :data="task.request_data"
-                                            @activity-assigned="activityAssigned"
-                                            @process-completed="redirectWhenProcessCompleted"
-                                            @process-updated="refreshWhenProcessUpdated"
-                                        >
-                                        </component>
-                                    </template>
-                                    <template v-else>
-                                        <task-screen
-                                            ref="taskScreen"
-                                            :process-id="task.process_id"
-                                            :instance-id="task.process_request_id"
-                                            :token-id="task.id"
-                                            :screen="[{items:[]}]"
-                                            :data="task.request_data"
-                                            @activity-assigned="activityAssigned"
-                                            @process-completed="redirectWhenProcessCompleted"
-                                            @process-updated="refreshWhenProcessUpdated"
-                                        >
-                                        </task-screen>
-                                    </template>
-                                </div>
-                                <div v-if="task.bpmn_tag_name === 'manualTask' || !task.screen" class="card-footer">
-                                    <button type="button" class="btn btn-primary" @click="submitTaskScreen">{{__('Complete Task')}}</button>
-                                </div>
-                            </template>
-                            <template v-if="taskIsCompleted">
-                              <div class="card card-body border-top-0 h-100">
-                                <task-screen
-                                    ref="taskWaitScreen"
-                                    v-if="task.allow_interstitial"
-                                    :process-id="task.process_id"
-                                    :instance-id="task.process_request_id"
-                                    :token-id="task.id"
-                                    :screen="task.interstitial_screen.config"
-                                    :computed="task.interstitial_screen.computed"
-                                    :custom-css="task.interstitial_screen.custom_css"
-                                    :watchers="task.interstitial_screen.watchers"
-                                    :data="task.request_data"
-                                    @activity-assigned="activityAssigned"
-                                    @process-completed="redirectWhenProcessCompleted"
-                                    @process-updated="refreshWhenProcessUpdated"
-                                ></task-screen>
-                                <div v-else class="card card-body text-center" v-cloak>
-                                    <h1>{{ __('Task Completed') }} <i class="fas fa-clipboard-check"></i></h1>
-                                </div>
+                          @can('update', $task)
+                            <task
+                              v-model="formData"
+                              :initial-task-id="{{ $task->id }}"
+                              :initial-request-id="{{ $task->process_request_id }}"
+                              :user-id="{{ Auth::user()->id }}"
+                              csrf-token="{{ csrf_token() }}"
+                              @task-updated="taskUpdated"
+                              @submit="submit"
+                              @completed="completed"
+                              @@error="error"
+                              @closed="closed"
+                          ></task>
+                          @endcan
+                            @can('view-comments')
+                              <div v-if="taskHasComments">
+                                <timeline :commentable_id="task.id"
+                                          commentable_type="ProcessMaker\Models\ProcessRequestToken"
+                                          :reactions="taskHasComments.reactions"
+                                          :voting="taskHasComments.voting"
+                                          :edit="taskHasComments.edit_comments"
+                                          :remove="taskHasComments.remove_comments"
+                                          :adding="taskHasComments.comments && userHasAccessToTask"
+                                          :readonly="task.status === 'CLOSED'"
+                                          />
                               </div>
-                            </template>
+                            @endcan
                         </div>
                         @can('editData', $task->processRequest)
                             <div v-if="task.process_request.status === 'ACTIVE'" id="tab-data" role="tabpanel" aria-labelledby="tab-data" class="card card-body border-top-0 tab-pane p-3">
@@ -159,15 +124,13 @@
                                       v-cloak>
                                 <div class="form-group">
                                     {!!Form::label('user', __('User'))!!}
-                                    <multiselect v-model="selectedUser"
+                                    <select-from-api v-model="selectedUser"
                                                   placeholder="{{__('Select the user to reassign to the task')}}"
-                                                  :options="usersList"
+                                                  api="users"
                                                   :multiple="false"
-                                                  track-by="fullname"
                                                   :show-labels="false"
-                                                  :searchable="false"
-                                                  :internal-search="false"
-                                                  @search-change="loadUsers"
+                                                  :searchable="true"
+                                                  :store-id="false"
                                                   label="fullname">
                                           <template slot="noResult">
                                             {{ __('No elements found. Consider changing the search query.') }}
@@ -192,7 +155,7 @@
                                                 <span class="option__title mr-1">@{{ props.option.fullname }}</span>
                                             </div>
                                         </template>
-                                    </multiselect>
+                                    </select-from-api>
                                 </div>
                                 <div slot="modal-footer">
                                     <button type="button" class="btn btn-outline-secondary" @click="cancelReassign">
@@ -204,6 +167,16 @@
                                     </button>
                                 </div>
                               </b-modal>
+                            </span>
+                          </div>
+                          <div v-if="taskDefinitionConfig.escalateToManager">
+                            <br>
+                            <span>
+                                <button v-if="task.advanceStatus === 'open' && !isSelfService" type="button" class="btn btn-outline-secondary btn-block"
+                                        @click="escalateToManager">
+                                    <i class="fas fa-user-friends"></i> {{__('Escalate the Manager')}}
+                                </button>
+                                <div v-else="isSelfService">{{ __('The task must be claimed to enable manager escalation.') }}</div>
                             </span>
                           </div>
                         </li>
@@ -230,7 +203,6 @@
             </div>
         </div>
     </div>
-
 @endsection
 
 @section('js')
@@ -243,6 +215,16 @@
         console.warn('Screen builder version does not have watchers');
       }
     });
+
+    window.PM4ConfigOverrides = {
+      requestFiles: @json($files),
+      getScreenEndpoint: 'tasks/{{ $task->id }}/screens',
+      postScriptEndpoint: '/scripts/execute/{id}?task_id={{ $task->id }}',
+    };
+
+    const task = @json($task);
+    const userHasAccessToTask = {{ Auth::user()->can('update', $task) ? "true": "false" }};
+
   </script>
     @foreach($manager->getScripts() as $script)
         <script src="{{$script}}"></script>
@@ -266,24 +248,41 @@
           usersList: [],
           filter: "",
           showReassignment: false,
-
-          task: @json($task->toArray()),
+          task,
+          userHasAccessToTask,
           statusCard: "card-header text-capitalize text-white bg-success",
           selectedUser: [],
           hasErrors: false,
+          redirectInProcess: false,
+          formData: {},
         },
         watch: {
           task: {
             deep: true,
-            handler(task) {
+            handler(task, oldTask) {
               window.ProcessMaker.breadcrumbs.taskTitle = task.element_name;
+              if (task && oldTask && task.id !== oldTask.id) {
+                history.replaceState(null, null, `/tasks/${task.id}/edit`);
+              }
             }
           },
-          showReassignment (show) {
-            show ? this.loadUsers() : null;
-          }
         },
         computed: {
+          taskDefinitionConfig () {
+            let config = {};
+            if (this.task.definition && this.task.definition.config) {
+              return JSON.parse(this.task.definition.config);
+            }
+            return {};
+          },
+          taskHasComments() {
+            const commentsPackage = 'comment-editor' in Vue.options.components;
+            let config = {};
+            if (commentsPackage && this.task.definition && this.task.definition.config) {
+              config = JSON.parse(this.task.definition.config);
+            }
+            return config;
+          },
           dueLabel() {
             const dueLabels = {
               'open': 'Due',
@@ -291,12 +290,6 @@
               'overdue': 'Due',
             };
             return dueLabels[this.task.advanceStatus] || '';
-          },
-          taskIsCompleted() {
-            return this.task.advanceStatus === 'completed' || this.task.advanceStatus === 'triggered';
-          },
-          taskIsOpenOrOverdue() {
-            return this.task.advanceStatus === 'open' || this.task.advanceStatus === 'overdue';
           },
           isSelfService() {
             return this.task.process_request.status === 'ACTIVE' && this.task.is_self_service;
@@ -322,22 +315,40 @@
           }
         },
         methods: {
-          activityAssigned() {
-            this.checkTaskStatus();
-            this.redirectToNextAssignedTask(false);
-          },
-          reload() {
-            this.loadTask(this.task.id);
-          },
-          loadTask(id) {
-            window.ProcessMaker.apiClient.get(`/tasks/${id}?include=data,user,requestor,processRequest,component,screen,requestData,bpmnTagName,interstitial,definition`)
-              .then((response) => {
-                this.$set(this, 'task', response.data);
-                if (response.data.process_request.status === 'ERROR') {
-                  this.hasErrors = true;
-                }
-                this.prepareTask();
+          escalateToManager() {
+            ProcessMaker.confirmModal(
+              'Confirm action', 'Are you sure to scale this task?', '', () => {
+                ProcessMaker.apiClient
+                  .put("tasks/" + this.task.id, {
+                    user_id: '#manager',
+                  })
+                  .then(response => {
+                    this.redirect("/tasks");
+                  });
               });
+          },
+          completed(processRequestId) {
+            // avoid redirection if using a customized renderer
+            if(this.task.component && this.task.component === 'AdvancedScreenFrame') {
+              return;
+            }
+            // If it is inside a subprocess
+            if(this.task.process_request.parent_request_id) {
+              this.redirect(`/requests/${this.task.process_request_id}/owner`);
+              return;
+            }
+
+            this.redirect(`/requests/${processRequestId}`);
+          },
+          error(processRequestId) {
+            this.redirect(`/requests/${this.task.process_request_id}`);
+          },
+          closed(taskId) {
+            // avoid redirection if using a customized renderer
+            if (this.task.component && this.task.component === 'AdvancedScreenFrame') {
+              return;
+            }
+            this.redirect("/tasks");
           },
           claimTask() {
             ProcessMaker.apiClient
@@ -346,56 +357,8 @@
                 is_self_service: 0,
               })
               .then(response => {
-                this.reload();
+                window.location.reload();
               });
-          },
-          redirectWhenProcessCompleted() {
-            window.location.href = `/requests/${this.task.process_request_id}`;
-          },
-          refreshWhenProcessUpdated(data) {
-            if (data.event === 'ACTIVITY_COMPLETED' || data.event === 'ACTIVITY_ACTIVATED') {
-              this.reload();
-            }
-          },
-          checkTaskStatus(redirect=false) {
-            if (this.task.status == 'COMPLETED' || this.task.status == 'CLOSED' || this.task.status == 'TRIGGERED') {
-              this.closeTask();
-            }
-          },
-          closeTask() {
-            if (this.hasErrors) {
-              window.location.href = `/requests/${this.task.process_request_id}`;
-              return;
-            }
-            if (!this.task.allow_interstitial) {
-              document.location.href = "/tasks";
-            } else {
-              this.redirectToNextAssignedTask();
-            }
-          },
-          redirectToNextAssignedTask(redirect = false) {
-            if (this.task.status == 'COMPLETED' || this.task.status == 'CLOSED' || this.task.status == 'TRIGGERED') {
-              window.ProcessMaker.apiClient.get(`/tasks?user_id=${this.task.user_id}&status=ACTIVE&process_request_id=${this.task.process_request_id}`).then((response) => {
-                if (response.data.data.length > 0) {
-                  const firstNextAssignedTask = response.data.data[0].id;
-                  if (redirect) {
-                    window.location.href = `/tasks/${firstNextAssignedTask}/edit`;
-                  } else {
-                    this.loadTask(firstNextAssignedTask);
-                  }
-                } else if (this.task.process_request.status === 'COMPLETED') {
-                  setTimeout(() => {
-                    window.location.href = `/requests/${this.task.process_request_id}`;
-                  }, 500);
-                }
-              });
-            }
-          },
-          /**
-           * Submit the task screen
-           */
-          submitTaskScreen () {
-            this.$refs.taskScreen.submit();
           },
           // Data editor
           updateRequestData () {
@@ -438,36 +401,16 @@
                 .then(response => {
                   this.showReassignment = false;
                   this.selectedUser = [];
-                  window.location.href =
-                    "/requests/" + response.data.process_request_id;
+                  this.redirect('/tasks');
                 });
             }
           },
-          loadUsers (filter) {
-            filter = typeof filter === "string" ? "?filter=" + filter + "&" : "?";
-            ProcessMaker.apiClient
-              .get(
-                "tasks/" + this.task.id + filter, {
-                  params: {
-                    include: "assignableUsers"
-                  }
-                }
-              )
-              .then(response => {
-                this.usersList = response.data.assignable_users;
-              });
-          },
-          classHeaderCard (status) {
-            let header = "bg-success";
-            switch (status) {
-              case "completed":
-                header = "bg-secondary";
-                break;
-              case "overdue":
-                header = "bg-danger";
-                break;
+          redirect(to) {
+            if (this.redirectInProcess) {
+              return;
             }
-            return "card-header text-capitalize text-white " + header;
+            this.redirectInProcess = true;
+            window.location.href = to;
           },
           assignedUserAvatar (user) {
             return [{
@@ -479,15 +422,37 @@
             let editor = this.$refs.monaco.getMonaco();
             editor.layout({height: window.innerHeight * 0.65});
           },
-          prepareTask(redirect = false) {
-            this.statusCard = this.classHeaderCard(this.task.advanceStatus);
-            this.updateRequestData = debounce(this.updateRequestData, 1000);
-            this.editJsonData();
-            this.checkTaskStatus(redirect);
+          prepareData() {
+              this.updateRequestData = debounce(this.updateRequestData, 1000);
+              this.editJsonData();
           },
+          updateTask(val) {
+            this.$set(this, 'task', val);
+          },
+          submit(task) {
+            if (this.isSelfService) {
+              ProcessMaker.alert(this.$t('Claim the Task to continue.'), 'warning');
+            } else {
+              let message = this.$t('Task Completed Successfully');
+              const taskId = task.id;
+              ProcessMaker.apiClient
+              .put("tasks/" + taskId, {status:"COMPLETED", data: this.formData})
+              .then(() => {
+                window.ProcessMaker.alert(message, 'success', 5, true);
+              })
+              .catch(error => {
+                // If there are errors, the user will be redirected to the request page
+                // to view error details. This is done in loadTask in Task.vue
+              });
+            }
+
+          },
+          taskUpdated(task) {
+            this.task = task;
+          }
         },
-        mounted () {
-          this.prepareTask(true);
+        mounted() {
+          this.prepareData();
         }
       });
       window.ProcessMaker.breadcrumbs.taskTitle = @json($task->element_name)
@@ -514,10 +479,6 @@
             height: 20px;
         }
 
-        .multiselect__tags-wrap {
-            display: flex !important;
-        }
-
         .multiselect__tags-wrap img {
             height: 15px;
             border-radius: 50%;
@@ -533,12 +494,6 @@
 
         .multiselect__option--selected.multiselect__option--highlight {
             background: #00bf9c !important;
-        }
-
-        .multiselect__tags {
-            border: 1px solid #b6bfc6 !important;
-            border-radius: 0.125em !important;
-            height: calc(1.875rem + 2px) !important;
         }
 
         .multiselect__tag {

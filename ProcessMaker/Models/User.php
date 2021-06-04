@@ -2,17 +2,20 @@
 
 namespace ProcessMaker\Models;
 
-use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Foundation\Auth\User as Authenticatable;
-use Illuminate\Notifications\Notifiable;
+use Carbon\Carbon;
 use Illuminate\Validation\Rule;
 use Laravel\Passport\HasApiTokens;
-use ProcessMaker\Models\RequestUserPermission;
 use ProcessMaker\Query\Traits\PMQL;
+use Illuminate\Session\Store as Session;
+use Illuminate\Notifications\Notifiable;
 use ProcessMaker\Traits\HasAuthorization;
-use ProcessMaker\Traits\SerializeToIso8601;
 use Spatie\MediaLibrary\HasMedia\HasMedia;
+use ProcessMaker\Traits\SerializeToIso8601;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use ProcessMaker\Models\RequestUserPermission;
 use Spatie\MediaLibrary\HasMedia\HasMediaTrait;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use ProcessMaker\Traits\HideSystemResources;
 
 class User extends Authenticatable implements HasMedia
 {
@@ -23,6 +26,7 @@ class User extends Authenticatable implements HasMedia
     use HasAuthorization;
     use SerializeToIso8601;
     use SoftDeletes;
+    use HideSystemResources;
 
     protected $connection = 'processmaker';
 
@@ -30,6 +34,8 @@ class User extends Authenticatable implements HasMedia
     public const DISK_PROFILE = 'profile';
     //collection media library
     public const COLLECTION_PROFILE = 'profile';
+    // Session key to save request ids that the user started
+    public const REQUESTS_SESSION_KEY = 'web-entry-request-ids';
 
     /**
      * The attributes that are mass assignable.
@@ -42,6 +48,7 @@ class User extends Authenticatable implements HasMedia
      *   @OA\Property(property="firstname", type="string"),
      *   @OA\Property(property="lastname", type="string"),
      *   @OA\Property(property="username", type="string"),
+     *   @OA\Property(property="password", type="string"),
      *   @OA\Property(property="address", type="string"),
      *   @OA\Property(property="city", type="string"),
      *   @OA\Property(property="state", type="string"),
@@ -58,14 +65,13 @@ class User extends Authenticatable implements HasMedia
      *   @OA\Property(property="expires_at", type="string"),
      *   @OA\Property(property="loggedin_at", type="string"),
      *   @OA\Property(property="remember_token", type="string"),
-     *   @OA\Property(property="status", type="string", enum={"ACTIVE", "INACTIVE"}),
-     *   @OA\Property(property="group_id", type="string"),
-     *   @OA\Property(property="member_type", type="string"),
-     *   @OA\Property(property="member_id", type="string"),
+     *   @OA\Property(property="status", type="string", enum={"ACTIVE", "INACTIVE", "SCHEDULED", "OUT_OF_OFFICE"}),
      *   @OA\Property(property="fullname", type="string"),
      *   @OA\Property(property="avatar", type="string"),
-     *   @OA\Property(property="media", type="array", @OA\Items(type="string")),
-     *   @OA\Property(property="birthdate", type="string"),
+     *   @OA\Property(property="media", type="array", @OA\Items(ref="#/components/schemas/media")),
+     *   @OA\Property(property="birthdate", type="string", format="date"),
+     *   @OA\Property(property="delegation_user_id", type="string", format="id"),
+     *   @OA\Property(property="manager_id", type="string", format="id"),
      * ),
      * @OA\Schema(
      *   schema="users",
@@ -73,7 +79,7 @@ class User extends Authenticatable implements HasMedia
      *      @OA\Schema(ref="#/components/schemas/usersEditable"),
      *      @OA\Schema(
      *          type="object",
-     *          @OA\Property(property="id", type="string", format="id"),
+     *          @OA\Property(property="id", type="integer"),
      *          @OA\Property(property="created_at", type="string", format="date-time"),
      *          @OA\Property(property="updated_at", type="string", format="date-time"),
      *          @OA\Property(property="deleted_at", type="string", format="date-time"),
@@ -102,6 +108,9 @@ class User extends Authenticatable implements HasMedia
         'datetime_format',
         'language',
         'meta',
+        'delegation_user_id',
+        'manager_id',
+        'schedule',
     ];
 
     protected $appends = [
@@ -113,7 +122,20 @@ class User extends Authenticatable implements HasMedia
         'is_administrator' => 'bool',
         'meta' => 'object',
         'active_at' => 'datetime',
+        'schedule' => 'array',
     ];
+
+    /**
+     * Register any model events
+     *
+     * @return void
+     */
+    public static function boot() {
+        parent::boot();
+        static::deleted(function($user) {
+            $user->removeFromGroups();
+        });
+    }
 
     /**
      * Validation rules
@@ -128,7 +150,7 @@ class User extends Authenticatable implements HasMedia
 
         $checkUserIsDeleted = function ($attribute, $value, $fail) use ($existing) {
             if (!$existing) {
-                $user = User::withTrashed()->where($attribute, $value)->first();
+                $user = User::onlyTrashed()->where($attribute, $value)->first();
                 if ($user) {
                     $fail(
                         __(
@@ -145,9 +167,9 @@ class User extends Authenticatable implements HasMedia
             'firstname' => ['required', 'max:50'],
             'lastname' => ['required', 'max:50'],
             'email' => ['required', 'email', $unique, $checkUserIsDeleted],
-            'status' => ['required', 'in:ACTIVE,INACTIVE'],
-            'password' => 'required|sometimes|min:6',
-            'birthdate' => 'date|nullable'
+            'status' => ['required', 'in:ACTIVE,INACTIVE,OUT_OF_OFFICE,SCHEDULED'],
+            'password' => $existing ? 'required|sometimes|min:6' : 'required|min:6',
+            'birthdate' => 'date|nullable' 
         ];
     }
 
@@ -186,7 +208,7 @@ class User extends Authenticatable implements HasMedia
         ]);
     }
 
-    public function hasPermissionsFor($resource)
+    public function hasPermissionsFor(...$resources)
     {
         if ($this->is_administrator) {
             $perms = Permission::all(['name'])->pluck('name');
@@ -194,12 +216,12 @@ class User extends Authenticatable implements HasMedia
             $perms = collect(session('permissions'));
         }
 
-        $filtered = $perms->filter(function ($value) use ($resource) {
-            $match = preg_match("/(.+)-{$resource}/", $value);
-            if ($match === 1) {
-                return true;
-            } else {
-                return false;
+        $filtered = $perms->filter(function ($value) use ($resources) {
+            foreach ($resources as $resource) {
+                $match = preg_match("/(.+)-{$resource}/", $value);
+                if ($match === 1) {
+                    return true;
+                }
             }
         });
 
@@ -347,24 +369,21 @@ class User extends Authenticatable implements HasMedia
             return false;
         }
 
-        return collect($task->self_service_groups)
-            ->intersect(
-                $this->groups()->pluck('groups.id')
-            )->count() > 0;
-    }
-
-    /**
-     * Update one request_user_permissions
-     *
-     * @param ProcessRequest $request
-     *
-     * @return void
-     */
-    public function updatePermissionToRequest(ProcessRequest $request)
-    {
-        $permission = RequestUserPermission::firstOrNew(['request_id' => $request->getKey(), 'user_id' => $this->getKey()]);
-        $permission->can_view = $this->can('view', $request);
-        $permission->save();
+        if (array_key_exists('users', $task->self_service_groups) && in_array(\Auth::user()->id, $task->self_service_groups['users'])) {
+            return true;
+        } else if (array_key_exists('groups', $task->self_service_groups)) {
+            $groups =  collect($task->self_service_groups['groups'])
+                ->intersect(
+                    $this->groups()->pluck('groups.id')
+                )->count() > 0;
+            return $groups;
+        } else {
+            // For older processes
+            return collect($task->self_service_groups)
+                ->intersect(
+                    $this->groups()->pluck('groups.id')
+                )->count() > 0;
+        }
     }
 
     public function updatePermissionsToRequests()
@@ -378,13 +397,95 @@ class User extends Authenticatable implements HasMedia
             $permission->can_view = $this->can('view', $permission->request);
             $permission->save();
         }
+
         // Add new request_user_permissions
-        $requests = ProcessRequest::whereRaw(
+
+        // Declare these variables once for the sake of speed
+        $timestamp = Carbon::now()->toDateTimeString();
+        $userId = $this->getKey();
+
+        // Find requests without permissions entries for this user
+        // while limiting the select clause to save memory
+        $query = ProcessRequest::whereRaw(
             'id not in (select request_id from request_user_permissions where user_id=?)',
             [$this->getKey()]
-        )->get();
-        foreach($requests as $request) {
-            $this->updatePermissionToRequest($request);
-        }
+        )->select(
+            'id', 'process_id', 'user_id', 'parent_request_id', 'callable_id'
+        );
+
+        // Process the results in chunks
+        $query->limit(500);
+        while ($query->count() > 0) {
+            // Retrieve this chunk
+            $requests = $query->get();
+            
+            // Declare our batch array
+            $batch = [];
+            
+            // Process each request
+            foreach ($requests as $request) {
+                $batch[] = [
+                    'request_id' => $request->id,
+                    'user_id' => $userId,
+                    'can_view' => $this->can('view', $request),
+                    'created_at' => $timestamp,
+                    'updated_at' => $timestamp,
+                ];
+            }
+
+            // Batch insert the new permissions
+            RequestUserPermission::query()->insert($batch);
+        }        
+    }
+
+    public function removeFromGroups()
+    {
+        $this->groups()->detach();
+    }
+    
+    public function availableSelfServiceTaskIds()
+    {
+        $groupIds = $this->groups()->pluck('groups.id');
+
+        $taskQuery = ProcessRequestToken::select(['id'])
+        ->where([
+            'is_self_service' => true,
+            'status' => 'ACTIVE',
+            'user_id' => null
+        ]);
+
+        $taskQuery->where(function($query) use($groupIds) {
+            // Check if `self_service_groups` contains any of the user's groups
+            foreach($groupIds as $groupId) {
+                $query->orWhereJsonContains('self_service_groups->groups', (int) $groupId);
+                // keep compatibility
+                $query->orWhereJsonContains('self_service_groups->groups', (string) $groupId);
+                $query->orWhereJsonContains('self_service_groups', (int) $groupId);
+                $query->orWhereJsonContains('self_service_groups', (string) $groupId);
+            }
+            $query->orWhereJsonContains('self_service_groups->users', (int) $this->id);
+            $query->orWhereJsonContains('self_service_groups->users', (string) $this->id);
+        });
+        return $taskQuery->pluck('id');
+    }
+
+    /**
+     * User's Delegation are user associations that allow for automatic reassignment based on specific availability of a user.
+     *
+     * @return User
+     */
+    public function delegationUser()
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /**
+     * User's Manager are user associations that allow for automatic reassignment based on specific rules in the task assignment.
+     *
+     * @return User
+     */
+    public function manager()
+    {
+        return $this->belongsTo(User::class);
     }
 }

@@ -31,6 +31,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png">
     <link href="{{ mix('css/app.css') }}" rel="stylesheet">
     <link href="{{ mix('css/sidebar.css') }}" rel="stylesheet">
+    <link href="/css/bpmn-symbols/css/bpmn.css" rel="stylesheet">
     @yield('css')
     <script type="text/javascript">
     @if(Auth::user())
@@ -38,6 +39,7 @@
         csrfToken: "{{csrf_token()}}",
         userId: "{{\Auth::user()->id}}",
         messages: @json(\Auth::user()->activeNotifications()),
+        apiTimeout: {{config('app.api_timeout')}}
       };
       @if(config('broadcasting.default') == 'redis')
         window.Processmaker.broadcasting = {
@@ -101,7 +103,16 @@
 <script src="{{ mix('js/manifest.js') }}"></script>
 <script src="{{ mix('js/vendor.js') }}"></script>
 <script src="{{ mix('js/app.js') }}"></script>
+<script>
+  window.ProcessMaker.packages = @json(\App::make(ProcessMaker\Managers\PackageManager::class)->listPackages());
+</script>
 <script src="{{ mix('js/app-layout.js') }}"></script>
+
+@include('shared.monaco')
+
+@foreach(GlobalScripts::getScripts() as $script)
+  <script src="{{$script}}"></script>
+@endforeach
     <!--javascript!-->
     @yield('js')
 </body>

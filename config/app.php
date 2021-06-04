@@ -40,6 +40,9 @@ return [
     // The fallback locale
     'fallback_locale' => 'en',
 
+    // The timeout length for API calls, in milliseconds (0 for no timeout)
+    'api_timeout' => env('API_TIMEOUT', 5000),
+
     'disable_php_upload_execution' => env('DISABLE_PHP_UPLOAD_EXECUTION', 0),
 
     //Option Fractal, Serializer
@@ -52,10 +55,11 @@ return [
     'web_client_application_id' => env('PM_CLIENT_ID', 'x-pm-local-client'),
 
     // The processmaker BPM scripts configuration
-    'processmaker_scripts_home' => env('PROCESSMAKER_SCRIPTS_HOME', '/home/vagrant'),
+    'processmaker_scripts_home' => env('PROCESSMAKER_SCRIPTS_HOME', __DIR__ . '/../storage/app'),
     'processmaker_scripts_docker' => env('PROCESSMAKER_SCRIPTS_DOCKER', '/usr/bin/docker'),
     'processmaker_scripts_docker_mode' => env('PROCESSMAKER_SCRIPTS_DOCKER_MODE', 'binding'),
     'timer_events_seconds' => env('TIMER_EVENTS_SECONDS', 'truncate'),
+    'bpmn_actions_max_lock_time' => intval(env('BPMN_ACTIONS_MAX_LOCK_TIME', 60)),
 
     // The url of our host from inside the docker
     'docker_host_url' => env('DOCKER_HOST_URL', preg_replace('/(\w+):\/\/([^:\/]+)(\:\d+)?/', '$1://172.17.0.1$3',
@@ -98,12 +102,16 @@ return [
         ProcessMaker\Providers\ProcessMakerServiceProvider::class,
         ProcessMaker\Providers\AuthServiceProvider::class,
         ProcessMaker\Providers\EventServiceProvider::class,
+        ProcessMaker\Providers\HorizonServiceProvider::class,
         ProcessMaker\Providers\TelescopeServiceProvider::class,
         ProcessMaker\Providers\RouteServiceProvider::class,
         ProcessMaker\Providers\BroadcastServiceProvider::class,
         ProcessMaker\Providers\WorkflowServiceProvider::class,
+        ProcessMaker\Providers\SettingServiceProvider::class,
         Laravel\Passport\PassportServiceProvider::class,
         Collective\Html\HtmlServiceProvider::class,
+        TeamTNT\Scout\TNTSearchScoutServiceProvider::class,
+        Laravel\Scout\ScoutServiceProvider::class,
 
     ],
 
@@ -148,6 +156,7 @@ return [
         /**
          * ProcessMaker specific Facades
          */
+        'GlobalScripts' => ProcessMaker\Facades\GlobalScripts::class,
         'WorkspaceManager' => ProcessMaker\Facades\WorkspaceManager::class,
         'SkinManager' => ProcessMaker\Facades\SkinManager::class,
 
@@ -156,6 +165,11 @@ return [
          */
         'Theme' => Igaster\LaravelTheme\Facades\Theme::class,
         'Menu'      => Lavary\Menu\Facade::class,
+        
+        /**
+         * Overwrite package classes
+         */        
+        'ElasticScoutDriver\Factories\SearchRequestFactory' => ProcessMaker\Factories\SearchRequestFactory::class,
 
 
     ],

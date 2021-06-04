@@ -44,7 +44,7 @@
 
   export default {
     mixins: [datatableMixin],
-    props: ["processRequestId", "status"],
+    props: ["processRequestId", "status", "isAdmin"],
     data() {
       return {
         orderBy: "due_at",
@@ -97,7 +97,10 @@
         return !row.user_id && row.is_self_service && assignable;
       },
       isEditable(row) {
-        return String(row.user_id) === String(window.ProcessMaker.user.id) || this.canClaim(row) || row.status !== "ACTIVE";
+          if (this.isAdmin) {
+              return true;
+          }
+        return String(row.user_id) === String(window.ProcessMaker.user.id) || this.canClaim(row) || row.status === "FAILING";
       },
       onAction(action, rowData, index) {
         switch (action) {
@@ -174,7 +177,7 @@
 </script>
 
 <style lang="scss" scoped>
-    /deep/ tr td:nth-child(3) {
+    >>> tr td:nth-child(3) {
         padding: 6px 10px;
     }
 </style>

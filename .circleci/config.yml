@@ -8,7 +8,7 @@ jobs:
     resource_class: xlarge
     docker:
       # specify the version you desire here
-      - image: circleci/php:7.2.8-fpm-node-browsers
+      - image: circleci/php:7.4.0-fpm-node-browsers
 
       # Specify service dependencies here if necessary
       # CircleCI maintains a library of pre-built images
@@ -28,6 +28,14 @@ jobs:
     working_directory: ~/repo
 
     steps:
+      - run:
+          name: Install node@14.4.0
+          command: |
+            set +e             
+            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.35.3/install.sh | bash
+            echo 'export NVM_DIR="$HOME/.nvm"' >> $BASH_ENV
+            echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> $BASH_ENV
+            echo 'nvm install v14.4.0' >> $BASH_ENV
       - run:
           name: Set Build Name Environment Variable
           # Set BUILD_NAME environment variable to a filesystem friendly name and store it in our bash environment
@@ -50,7 +58,7 @@ jobs:
       - run: sudo docker-php-ext-install gd zip pdo_mysql mysqli
       - run: sudo apt-get install -y libfreetype6-dev libjpeg62-turbo-dev libpng-dev
       - run: sudo docker-php-ext-install -j$(nproc) iconv
-      - run: sudo docker-php-ext-configure gd --with-freetype-dir=/usr/include/ --with-jpeg-dir=/usr/include/
+      - run: sudo docker-php-ext-configure gd --enable-gd --with-freetype --with-jpeg
       - run: sudo docker-php-ext-install -j$(nproc) gd
       - run: sudo docker-php-ext-install -j$(nproc) pcntl
       - run: sudo docker-php-ext-install -j$(nproc) exif
@@ -66,7 +74,7 @@ jobs:
             sudo sh -c 'echo "en_US.UTF-8 UTF-8" > /etc/locale.gen'
             sudo locale-gen
             sudo apt-get update
-            sudo ACCEPT_EULA=Y apt-get install msodbcsql
+            sudo ACCEPT_EULA=Y apt-get install msodbcsql17
             sudo apt-get install unixodbc-dev
             sudo pecl install sqlsrv
             sudo pecl install pdo_sqlsrv
@@ -103,7 +111,7 @@ jobs:
           command: |
             sudo php artisan vendor:publish --tag=telescope-assets --force
 
-      - run: sudo npm install -g npm@6.4.1 && npm ci
+      - run: npm ci
 
       - save_cache:
           paths:
@@ -149,7 +157,7 @@ jobs:
       # run tests!
       - run:
           name: 'PHPUnit'
-          command: './vendor/bin/phpunit -v -d memory_limit=-1'
+          command: './vendor/bin/phpunit -v -d memory_limit=-1 --coverage-html ./tests/coverage-report'
           environment:
             DB_DATABASE: 'circle_test'
             DB_PASSWORD: 'P4ssW0rd1!'
@@ -173,8 +181,10 @@ jobs:
           name: 'Jest'
           command: 'npm run test'
 
+      - store_test_results:
+          path: tests/coverage-report
       - store_artifacts:
-          path: coverage
+          path: tests/coverage-report
 
       #- store_artifacts:
       #    path: tests/js/coverage

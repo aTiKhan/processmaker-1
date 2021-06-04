@@ -44,13 +44,16 @@
                                 {{__('Browse')}}
                             </button>
                         </div>
+                        <div align="center">
+                            {{__('Image types accepted: .gif, .jpg, .jpeg, .png')}}
+                        </div>
                         <vue-croppie :style="{display: (image) ? 'block' : 'none' }" ref="croppie"
                                      :viewport="{ width: 380, height: 380, type: 'circle' }"
                                      :boundary="{ width: 400, height: 400 }"
                                      :enable-orientation="false" :enable-resize="false">
                         </vue-croppie>
                     </div>
-                    <input type="file" class="custom-file-input" ref="customFile" @change="onFileChange">
+                    <input type="file" class="custom-file-input" accept=".gif,.jpg,.jpeg,.png,image/jpeg,image/gif,image/png" ref="customFile" @change="onFileChange">
                 </div>
 
                 <div class="modal-footer">
@@ -80,6 +83,7 @@
             el: '#profileForm',
             mixins:addons,
             data: {
+                meta: @json(config('users.properties')),
                 formData: @json($currentUser),
                 langs: @json($availableLangs),
                 timezones: @json($timezones),
@@ -104,6 +108,19 @@
                         initials: @json($currentUser['firstname'][0]) + @json($currentUser['lastname'][0])
                     }
                 ]
+            },
+            created() {
+              if (this.meta) {
+                let keys = Object.keys(this.meta);
+                if (!this.formData.meta) {
+                    this.formData.meta = {};
+                }
+                keys.forEach(key => {
+                   if (!this.formData.meta[key]) {
+                       this.formData.meta[key] = null;
+                   }
+                });
+              }
             },
             methods: {
                 profileUpdate() {

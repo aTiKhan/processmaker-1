@@ -7,6 +7,8 @@ Route::group(['middleware' => ['auth', 'sanitize', 'external.connection']], func
     // Routes related to Authentication (password reset, etc)
     // Auth::routes();
     Route::namespace('Admin')->prefix('admin')->group(function () {
+        Route::get('settings', 'SettingsController@index')->name('settings.index')->middleware('can:view-settings');
+        Route::get('settings/export', 'SettingsController@export')->name('settings.export')->middleware('can:view-settings');
         Route::get('groups', 'GroupController@index')->name('groups.index')->middleware('can:view-groups');
         // Route::get('groups/{group}', 'GroupController@show')->name('groups.show')->middleware('can:show-groups,group');
         Route::get('groups/{group}/edit', 'GroupController@edit')->name('groups.edit')->middleware('can:edit-groups,group');
@@ -37,6 +39,9 @@ Route::group(['middleware' => ['auth', 'sanitize', 'external.connection']], func
         Route::get('scripts', 'ScriptController@index')->name('scripts.index')->middleware('can:view-scripts');
         Route::get('scripts/{script}/edit', 'ScriptController@edit')->name('scripts.edit')->middleware('can:edit-scripts,script');
         Route::get('scripts/{script}/builder', 'ScriptController@builder')->name('scripts.builder')->middleware('can:edit-scripts,script');
+
+        Route::get('signals', 'SignalController@index')->name('signals.index')->middleware('can:view-signals');
+        Route::get('signals/{signalId}/edit', 'SignalController@edit')->name('signals.edit')->middleware('can:edit-signals');
     });
 
     Route::get('designer/processes/categories', 'ProcessController@index')->name('process-categories.index') ->middleware ('can:view-process-categories');
@@ -55,6 +60,8 @@ Route::group(['middleware' => ['auth', 'sanitize', 'external.connection']], func
     Route::get('processes/{process}', 'ProcessController@show')->name('processes.show')->middleware('can:view-processes');
     Route::put('processes/{process}', 'ProcessController@update')->name('processes.edit')->middleware('can:edit-processes');
     Route::delete('processes/{process}', 'ProcessController@destroy')->name('processes.destroy')->middleware('can:archive-processes');
+    
+    Route::get('process_events/{process}', 'ProcessController@triggerStartEventApi')->middleware('can:start,process');
 
     Route::get('about', 'AboutController@index')->name('about.index');
 
@@ -68,24 +75,28 @@ Route::group(['middleware' => ['auth', 'sanitize', 'external.connection']], func
     Route::post('/keep-alive', 'Auth\LoginController@keepAlive')->name('keep-alive');
 
     Route::get('requests/search', 'RequestController@search')->name('requests.search');
-    Route::get('requests/{type}', 'RequestController@index')
+    Route::get('requests/{type?}', 'RequestController@index')
         ->where('type', 'all|in_progress|completed')
         ->name('requests_by_type');
-    Route::get('request/{requestID}/files/{fileID}', 'RequestController@downloadFiles');
+    Route::get('request/{request}/files/{media}', 'RequestController@downloadFiles')->middleware('can:view,request');
     Route::get('requests', 'RequestController@index')->name('requests.index');
     Route::get('requests/{request}', 'RequestController@show')->name('requests.show');
-    Route::get('requests/{request}/screen/{screen}', 'RequestController@screenPreview')->name('requests.screen-preview');
+    Route::get('requests/{request}/owner', 'RequestController@showOwner')->name('requests.showOwner');
+    Route::get('requests/{request}/task/{task}/screen/{screen}', 'RequestController@screenPreview')->name('requests.screen-preview');
 
     Route::get('tasks/search', 'TaskController@search')->name('tasks.search');
     Route::get('tasks', 'TaskController@index')->name('tasks.index');
     Route::get('tasks/{task}/edit', 'TaskController@edit')->name('tasks.edit');
 
-    Route::get('notifications', 'NotificationController@index')->name('notifications.index');
+    Route::get('notifications', 'NotificationController@index')->name('notifications.index')->middleware('can:view-notifications,notification');
 
     // Allows for a logged in user to see navigation on a 404 page
     Route::fallback(function () {
         return response()->view('errors.404', [], 404);
     })->name('fallback');
+
+    Route::get('/test_status', 'TestStatusController@test')->name('test.status');
+    Route::get('/test_email', 'TestStatusController@email')->name('test.email');
 });
 
 // Add our broadcasting routes

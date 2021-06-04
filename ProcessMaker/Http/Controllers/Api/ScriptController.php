@@ -58,7 +58,7 @@ class ScriptController extends Controller
      *             @OA\Property(
      *                 property="meta",
      *                 type="object",
-     *                 allOf={@OA\Schema(ref="#/components/schemas/metadata")},
+     *                 @OA\Schema(ref="#/components/schemas/metadata"),
      *             ),
      *         ),
      *     ),
@@ -87,14 +87,21 @@ class ScriptController extends Controller
         }
 
         $filter = $request->input('filter', '');
+        $isSelectList = $request->input('selectList', '');
         if (!empty($filter)) {
             $filter = '%' . $filter . '%';
-            $query->where(function ($query) use ($filter) {
-                $query->Where('title', 'like', $filter)
-                    ->orWhere('description', 'like', $filter)
-                    ->orWhere('language', 'like', $filter)
-                    ->orWhere('category.name', 'like', $filter);
-            });
+            if (!$isSelectList) {
+                $query->where(function ($query) use ($filter) {
+                    $query->Where('title', 'like', $filter)
+                        ->orWhere('description', 'like', $filter)
+                        ->orWhere('language', 'like', $filter)
+                        ->orWhere('category.name', 'like', $filter);
+                });    
+            } else  {
+                $query->where(function ($query) use ($filter) {
+                    $query->Where('title', 'like', $filter);
+                });
+            }
         }
 
 
@@ -111,10 +118,10 @@ class ScriptController extends Controller
     /**
      * Previews executing a script, with sample data/config data
      *
-     *     @OA\Post(
+     * @OA\Post(
      *     path="/scripts/{script_id}/preview",
      *     summary="Test script code without saving it",
-     *     operationId="getScriptsPreview",
+     *     operationId="previewScript",
      *     tags={"Scripts"},
      *         @OA\Parameter(
      *             name="script_id",
@@ -122,26 +129,32 @@ class ScriptController extends Controller
      *             @OA\Schema(type="integer"),
      *             required=true,
      *         ),
-     *         @OA\Parameter(
-     *             name="data",
-     *             in="query",
-     *             @OA\Schema(type="string"),
-     *         ),
-     *         @OA\Parameter(
-     *             name="config",
-     *             in="query",
-     *             @OA\Schema(type="string"),
-     *         ),
-     *         @OA\Parameter(
-     *             name="code",
-     *             in="query",
-     *             @OA\Schema(type="string"),
+     *         @OA\RequestBody(
+     *           @OA\JsonContent(
+     *             @OA\Property(
+     *                 property="data",
+     *                 type="array",
+     *                 @OA\Items (type="object"),
+     *             ),
+     *             @OA\Property(
+     *                 property="config",
+     *                 type="array",
+     *                 @OA\Items (type="object"),
+     *             ),
+     *             @OA\Property(
+     *                 property="code",
+     *                 type="string",
+     *             ),
+     *             @OA\Property(
+     *                 property="nonce",
+     *                 type="string",
+     *             ),
+     *           ),
      *         ),
      *
      *     @OA\Response(
      *         response=200,
      *         description="success if the script was queued",
-     *         @OA\JsonContent(ref="#/components/schemas/scriptsPreview")
      *         ),
      *     ),
      * )
@@ -151,16 +164,17 @@ class ScriptController extends Controller
         $data = json_decode($request->get('data'), true) ?: [];
         $config = json_decode($request->get('config'), true) ?: [];
         $code = $request->get('code');
+        $nonce = $request->get('nonce');
 
-        TestScript::dispatch($script, $request->user(), $code, $data, $config);
+        TestScript::dispatch($script, $request->user(), $code, $data, $config, $nonce)->onQueue('bpmn');
         return ['status' => 'success'];
     }
 
     /**
      * Executes a script, with sample data/config data
      *
-     *     @OA\Post(
-     *     path="/scripts/{script_id}/execute",
+     * @OA\Post(
+     *     path="/scripts/execute/{script_id}",
      *     summary="Execute script",
      *     operationId="executeScript",
      *     tags={"Scripts"},
@@ -170,15 +184,19 @@ class ScriptController extends Controller
      *             @OA\Schema(type="integer"),
      *             required=true,
      *         ),
-     *         @OA\Parameter(
-     *             name="data",
-     *             in="query",
-     *             @OA\Schema(type="string"),
-     *         ),
-     *         @OA\Parameter(
-     *             name="config",
-     *             in="query",
-     *             @OA\Schema(type="string"),
+     *         @OA\RequestBody(
+     *           @OA\JsonContent(
+     *             @OA\Property(
+     *                 property="data",
+     *                 type="array",
+     *                 @OA\Items (type="object"),
+     *             ),
+     *             @OA\Property(
+     *                 property="config",
+     *                 type="array",
+     *                 @OA\Items (type="object"),
+     *             ),
+     *           ),
      *         ),
      *
      *     @OA\Response(
@@ -191,12 +209,17 @@ class ScriptController extends Controller
     public function execute(Request $request, ...$scriptKey)
     {
         $script = count($scriptKey) === 1 && is_numeric($scriptKey[0]) ? Script::find($scriptKey[0]) : Script::where('key', implode('/', $scriptKey))->first();
+        $this->authorize('execute', $script);
         $data = json_decode($request->get('data'), true) ?: [];
         $config = json_decode($request->get('config'), true) ?: [];
         $watcher = $request->get('watcher', uniqid('scr', true));
         $code = $script->code;
 
-        ExecuteScript::dispatch($script, $request->user(), $code, $data, $watcher, $config);
+        if ($request->get('sync') === true) {
+            return ExecuteScript::dispatchNow($script, $request->user(), $code, $data, $watcher, $config, true);
+        } else {
+            ExecuteScript::dispatch($script, $request->user(), $code, $data, $watcher, $config)->onQueue('bpmn');
+        }
         return ['status' => 'success', 'key' => $watcher];
     }
 
@@ -349,8 +372,8 @@ class ScriptController extends Controller
      *     @OA\Put(
      *     path="/scripts/{scripts_id}/duplicate",
      *     summary="duplicate a script",
-     *     operationId="duplicateScreen",
-     *     tags={"scripts"},
+     *     operationId="duplicateScript",
+     *     tags={"Scripts"},
      *     @OA\Parameter(
      *         description="ID of script to return",
      *         in="path",

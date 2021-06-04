@@ -2,6 +2,7 @@
 
 namespace ProcessMaker\Listeners;
 
+use ProcessMaker\Models\FormalExpression;
 use ProcessMaker\Nayra\Contracts\Bpmn\ActivityInterface;
 use ProcessMaker\Nayra\Bpmn\Events\ActivityActivatedEvent;
 use ProcessMaker\Nayra\Bpmn\Events\ActivityCompletedEvent;
@@ -20,6 +21,7 @@ use ProcessMaker\Nayra\Contracts\Bpmn\TokenInterface;
 use ProcessMaker\Facades\WorkflowManager;
 use ProcessMaker\Models\Comment;
 use ProcessMaker\Models\ProcessRequest;
+use ProcessMaker\Nayra\Contracts\Bpmn\TransitionInterface;
 use ProcessMaker\Notifications\ProcessCreatedNotification;
 use ProcessMaker\Notifications\ProcessCompletedNotification;
 use ProcessMaker\Notifications\ActivityActivatedNotification;
@@ -41,6 +43,9 @@ class BpmnSubscriber
      */
     public function onProcessCompleted(ProcessInstanceCompletedEvent $event)
     {
+        if ($event->instance->isNonPersistent()) {
+            return;
+        }
         Log::info('Process completed: ' . json_encode($event->instance->getProperties()));
 
         $notifiables = $event->instance->getNotifiables('completed');
@@ -55,6 +60,9 @@ class BpmnSubscriber
      */
     public function onProcessCreated(ProcessInstanceCreatedEvent $event)
     {
+        if ($event->instance->isNonPersistent()) {
+            return;
+        }
         Log::info('Process created: ' . json_encode($event->instance->getProperties()));
 
         $notifiables = $event->instance->getNotifiables('started');
@@ -69,6 +77,9 @@ class BpmnSubscriber
     public function onActivityActivated(ActivityActivatedEvent $event)
     {
         $token = $event->token;
+        if ($token->getInstance()->isNonPersistent()) {
+            return;
+        }
         Log::info('Activity activated: ' . json_encode($token->getProperties()));
 
         $notifiables = $token->getNotifiables('assigned');
@@ -84,6 +95,9 @@ class BpmnSubscriber
     public function onActivityCompleted(ActivityCompletedEvent $event)
     {
         $token = $event->token;
+        if ($token->getInstance()->isNonPersistent()) {
+            return;
+        }
         Log::info('Activity completed: ' . json_encode($token->getProperties()));
 
         if ($token->element_type == 'task') {
@@ -150,6 +164,50 @@ class BpmnSubscriber
         }
     }
 
+    public function updateDataWithFlowTransition($transition, $flow, $instance)
+    {
+        // Exit job if flow doesn't have set a config attribute
+        if (empty($flow->getProperties()['config'])) {
+            return;
+        }
+
+        // Exit if config is not a valid json
+        if (empty(json_decode($flow->getProperties()['config']))) {
+            Log::error('Flow config attribut is not a valid json');
+            return;
+        }
+
+        // Exit if no variable or expression is set
+        $config = json_decode($flow->getProperties()['config'], true);
+        if ( empty($config['update_data'])
+            || empty($config['update_data']['variable'])
+            || empty($config['update_data']['expression'])
+        ) {
+            return;
+        }
+
+        try {
+            $variable = $config['update_data']['variable'];
+            $expression = $config['update_data']['expression'];
+
+            $formalExp = new FormalExpression();
+            $formalExp->setLanguage('FEEL');
+            $formalExp->setBody($expression);
+            $data = $instance->getDataStore()->getData();
+            $expressionResult = $formalExp($data);
+            $data = array_merge($data, [$variable => $expressionResult]);
+            $data = $data;
+            $instance->getDataStore()->setData($data);
+            if (!$instance->isNonPersistent()) {
+                $instance->data = $data;
+                $instance->saveOrFail();
+            }
+        } catch (\Exception $e) {
+            Log::error('The expression used in the flow generated and error: ', [$e->getMessage()]);
+            $instance->logError($e, $transition->getOwner());
+        }
+    }
+
     /**
      * Subscription.
      *
@@ -157,6 +215,9 @@ class BpmnSubscriber
      */
     public function subscribe($events)
     {
+        $events->listen(TransitionInterface::EVENT_CONDITIONED_TRANSITION, static::class . '@updateDataWithFlowTransition');
+
+
         $events->listen(ProcessInterface::EVENT_PROCESS_INSTANCE_CREATED, static::class . '@onProcessCreated');
         $events->listen(ProcessInterface::EVENT_PROCESS_INSTANCE_COMPLETED, static::class . '@onProcessCompleted');
 

@@ -2,13 +2,17 @@
 
 namespace ProcessMaker\Http\Controllers\Api;
 
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use ProcessMaker\Http\Controllers\Controller;
 use ProcessMaker\Http\Resources\ApiCollection;
 use ProcessMaker\Http\Resources\ApiResource;
+use ProcessMaker\Http\Resources\Screen as ScreenResource;
 use ProcessMaker\Jobs\ExportScreen;
 use ProcessMaker\Jobs\ImportScreen;
 use ProcessMaker\Models\Screen;
+use ProcessMaker\Models\ScreenType;
 use ProcessMaker\Query\SyntaxError;
 
 class ScreenController extends Controller
@@ -40,6 +44,12 @@ class ScreenController extends Controller
      *     @OA\Parameter(ref="#/components/parameters/order_direction"),
      *     @OA\Parameter(ref="#/components/parameters/per_page"),
      *     @OA\Parameter(ref="#/components/parameters/include"),
+     *     @OA\Parameter(
+     *         name="exclude",
+     *         in="query",
+     *         description="Comma separated list of fields to exclude from the response",
+     *         @OA\Schema(type="string", default=""),
+     *     ),
      *
      *     @OA\Response(
      *         response=200,
@@ -54,7 +64,7 @@ class ScreenController extends Controller
      *             @OA\Property(
      *                 property="meta",
      *                 type="object",
-     *                 allOf={@OA\Schema(ref="#/components/schemas/metadata")},
+     *                 @OA\Schema(ref="#/components/schemas/metadata"),
      *             ),
      *         ),
      *     ),
@@ -64,7 +74,6 @@ class ScreenController extends Controller
     {
         $query = Screen::nonSystem()
                     ->select('screens.*')
-                    ->where('key', null)
                     ->leftJoin('screen_categories as category', 'screens.screen_category_id', '=', 'category.id');
         $include = $request->input('include', '');
 
@@ -82,20 +91,31 @@ class ScreenController extends Controller
 
 
         $filter = $request->input('filter', '');
+        $isSelectList = $request->input('selectList', '');
         if (!empty($filter)) {
             $filter = '%' . $filter . '%';
-            $query->where(function ($query) use ($filter) {
-                $query->where('title', 'like', $filter)
-                    ->orWhere('description', 'like', $filter)
-                    ->orWhere('type', 'like', $filter)
-                    ->orWhere('config', 'like', $filter)
-                    ->orWhere('category.name', 'like', $filter);
-            });
+            if (!$isSelectList) {
+                $query->where(function ($query) use ($filter) {
+                    $query->where('title', 'like', $filter)
+                        ->orWhere('description', 'like', $filter)
+                        ->orWhere('category.name', 'like', $filter);
+                });
+            } else {
+                $query->where(function ($query) use ($filter) {
+                    $query->where('title', 'like', $filter);
+                });
+            }
         }
-        if ($request->input('type')) {
+        $interactive = filter_var($request->input('interactive'), FILTER_VALIDATE_BOOLEAN);
+        if ($interactive) {
+            $screens = ScreenType::where('is_interactive', $interactive)->get('name');
+            $query->whereIn('type', $screens);
+        }
+        if (!$interactive  && $request->input('type')) {
             $types = explode(',', $request->input('type'));
             $query->whereIn('type', $types);
         }
+
         $pmql = $request->input('pmql', '');
         if (!empty($pmql)) {
             try {
@@ -109,6 +129,13 @@ class ScreenController extends Controller
                 $request->input('order_by', 'title'),
                 $request->input('order_direction', 'ASC')
             )->paginate($request->input('per_page', 10));
+
+        $exclude = $request->input('exclude', '');
+        if ($exclude) {
+            $exclusions = explode(',', $exclude);
+            $response->makeHidden($exclusions);
+        }
+
         return new ApiCollection($response);
     }
 
@@ -142,7 +169,7 @@ class ScreenController extends Controller
      */
     public function show(Screen $screen)
     {
-        return new ApiResource($screen);
+        return new ScreenResource($screen);
     }
 
     /**
@@ -155,7 +182,7 @@ class ScreenController extends Controller
      *  @OA\Post(
      *     path="/screens",
      *     summary="Save a new screens",
-     *     operationId="createScreens",
+     *     operationId="createScreen",
      *     tags={"Screens"},
      *     @OA\RequestBody(
      *       required=true,
@@ -229,7 +256,7 @@ class ScreenController extends Controller
      *     @OA\Put(
      *     path="/screens/{screens_id}/duplicate",
      *     summary="duplicate a screen",
-     *     operationId="duplicateScript",
+     *     operationId="duplicateScreen",
      *     tags={"Screens"},
      *     @OA\Parameter(
      *         description="ID of screen to return",
@@ -346,7 +373,7 @@ class ScreenController extends Controller
         if ($fileKey) {
             return ['url' => url("/designer/screens/{$screen->id}/download/{$fileKey}")];
         } else {
-            return response(['error' => __('Unable to Export Screen')], 500);
+            return response(['message' => __('Unable to Export Screen')], 500);
         }
     }
 
@@ -367,7 +394,9 @@ class ScreenController extends Controller
      *     @OA\Response(
      *         response=201,
      *         description="success",
-     *         @OA\JsonContent(ref="#/components/schemas/screens")
+     *         @OA\JsonContent(
+     *             @OA\Property(property="status", type="object"),
+     *         )
      *     ),
      *     @OA\RequestBody(
      *         required=true,
@@ -375,12 +404,11 @@ class ScreenController extends Controller
      *             mediaType="multipart/form-data",
      *             @OA\Schema(
      *                 @OA\Property(
-     *                     description="file to upload",
      *                     property="file",
-     *                     type="file",
-     *                     format="file",
+     *                     description="file to import",
+     *                     type="string",
+     *                     format="binary",
      *                 ),
-     *                 required={"file"}
      *             )
      *         )
      *     ),
@@ -388,7 +416,73 @@ class ScreenController extends Controller
      */
     public function import(Request $request)
     {
-        $success = ImportScreen::dispatchNow($request->file('file')->get());
-        return ['status' => $success];
+        $content = $request->file('file')->get();
+        if (!$this->validateImportedFile($content)) {
+            return response(
+                ['message' => __('Invalid Format')],
+                422
+            );
+        }
+
+        $import = ImportScreen::dispatchNow($content);
+        return ['status' => $import];
+    }
+
+    /**
+     * Verify if the file is valid to be imported
+     *
+     * @param string $content
+     *
+     * @return bool
+     */
+    private function validateImportedFile($content)
+    {
+        $decoded = substr($content, 0, 1) === '{' ? json_decode($content) : (($content = base64_decode($content)) && substr($content, 0, 1) === '{' ? json_decode($content) : null);
+        $isDecoded = $decoded && is_object($decoded);
+        $hasType = $isDecoded && isset($decoded->type) && is_string($decoded->type);
+        $validType = $hasType && $decoded->type === 'screen_package';
+        $hasVersion = $isDecoded && isset($decoded->version) && is_string($decoded->version);
+        $validVersion = $hasVersion && method_exists(ImportScreen::class, "parseFileV{$decoded->version}");
+        return $isDecoded && $validType && $validVersion;
+    }
+
+    /**
+     * Get preview a screen
+     *
+     * @param Request $request
+     *
+     * @return ResponseFactory|Response
+     *
+     * @OA\Post(
+     *     path="/screens/preview",
+     *     summary="Preview a screen",
+     *     operationId="preview",
+     *     tags={"Screens"},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             type="object",
+     *             @OA\Property(property="config", type="object"),
+     *             @OA\Property(property="watchers", type="object"),
+     *             @OA\Property(property="computed", type="object"),
+     *             @OA\Property(property="custom_css", type="string"),
+     *         ),
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Successfully found the screen",
+     *         @OA\JsonContent(ref="#/components/schemas/screens")
+     *     ),
+     * )
+     */
+    public function preview(Request $request)
+    {
+        $screen = new Screen();
+        $screen->config = $request->post('config');
+        $screen->watchers = $request->post('watchers');
+        $screen->computed = $request->post('computed');
+        $screen->custom_css = $request->post('custom_css');
+
+        return new ScreenResource($screen);
     }
 }

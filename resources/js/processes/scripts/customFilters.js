@@ -10,11 +10,11 @@ Vue.filter('php', function(value) {
     } else if (i == value.length - 1) {
       format = line + '*/';
     } else {
-      line = line.replace('{accessEnvVar}',  `get_env("ENV_VAR_NAME")`);
+      line = line.replace('{accessEnvVar}',  `getenv("ENV_VAR_NAME")`);
       line = line.replace('{dataVariable}',  `$data`);
       line = line.replace('{configVariable}',  `$config`);
       line = line.replace('{apiExample}',  `$api->users()->getUserById(1)['email']`);
-      line = line.replace('{apiDocsUrl}', `https://github.com/ProcessMaker/sdk-php#documentation-for-api-endpoints`);
+      line = line.replace('{apiDocsUrl}', `https://github.com/ProcessMaker/docker-executor-php/tree/master/docs/sdk`);
       format = ' * ' + line;
     }
     content.push(format);
@@ -36,8 +36,8 @@ Vue.filter('javascript', function(value) {
       format = line + '*/';
     } else {
       line = line.replace('{accessEnvVar}',  `process.env.ENV_VAR_NAME`);
-      line = line.replace('{dataVariable}',  `$data`);
-      line = line.replace('{configVariable}',  `$config`);
+      line = line.replace('{dataVariable}',  `data`);
+      line = line.replace('{configVariable}',  `config`);
       line = line.replace('{apiExample}',  `getUserById(id, (error, data, response) => {})`);
       line = line.replace('{apiDocsUrl}', `https://github.com/ProcessMaker/sdk-node#documentation-for-api-endpoints`);
       format = ' * ' + line;

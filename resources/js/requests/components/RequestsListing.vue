@@ -1,7 +1,7 @@
 <template>
   <div class="data-table">
     <data-loading
-            :for=/requests\?page/
+            :for=/requests\?page|results\?page/
             v-show="shouldShowLoader"
             :empty="$t('No Data Available')"
             :empty-desc="$t('')"
@@ -71,7 +71,14 @@ Vue.component("avatar-image", AvatarImage);
 
 export default {
   mixins: [datatableMixin, dataLoadingMixin],
-  props: ["filter", "columns", "pmql"],
+  props: {
+    filter: {},
+    columns: {},
+    pmql: {},
+    savedSearch: {
+      default: false
+    }
+  },
   data() {
     return {
       orderBy: "id",
@@ -84,8 +91,18 @@ export default {
           direction: "desc"
         }
       ],
-      fields: []
+      fields: [],
+      previousFilter: ""
     };
+  },
+  computed: {
+    endpoint() {
+      if (this.savedSearch !== false) {
+        return `saved-searches/${this.savedSearch}/results`;
+      }
+      
+      return 'requests';
+    },
   },
   mounted() {
     this.setupColumns();
@@ -114,8 +131,12 @@ export default {
         if (!field.field) {
           field.field = column.field;
         }
-        
-        if (column.sortable && ! field.sortField) {
+
+        if (column.format === 'datetime' || column.format === 'date') {
+          field.callback = 'formatDate';
+        }
+
+        if (column.sortable === true && !field.sortField) {
           field.sortField = column.field;
         }
         
@@ -226,12 +247,8 @@ export default {
       }
       return data;
     },
-    fetch(query, resetPagination) {
+    fetch() {
         Vue.nextTick(() => {
-            if (resetPagination) {
-              this.page = 1;
-            }
-            
             let pmql = '';
             
             if (this.pmql !== undefined) {
@@ -240,18 +257,23 @@ export default {
                     
             let filter = this.filter;
             
-            if (query && query.length) {
-              if (query.isPMQL()) {
-                pmql = `(${pmql}) and (${query})`;
-              } else {
-                filter = query;
+            if (filter && filter.length) {
+              if (filter.isPMQL()) {
+                pmql = `(${pmql}) and (${filter})`;
+                filter = '';
               }
             }
+
+            if (this.previousFilter !== filter) {
+              this.page = 1;
+            }
+
+            this.previousFilter = filter;
 
             // Load from our api client
             ProcessMaker.apiClient
               .get(
-                "requests?page=" +
+                `${this.endpoint}?page=` +
                   this.page +
                   "&per_page=" +
                   this.perPage +
@@ -270,8 +292,10 @@ export default {
                 this.data = this.transform(response.data);
               }).catch(error => {
                 if (_.has(error, 'response.data.message')) {
-                  ProcessMaker.alert(error.response.data.message, 'danger');
-                } else {
+                  ProcessMaker.alert(error.response.data.message, 'danger');  
+                } else if(_.has(error, 'response.data.error')) {
+                  return;
+                }  else {
                   throw error;
                 }
               });

@@ -2,6 +2,7 @@
 
 namespace ProcessMaker;
 
+use ProcessMaker\Models\GlobalDataStore;
 use ProcessMaker\Models\ProcessRequest;
 use ProcessMaker\Nayra\Contracts\Bpmn\ProcessInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\StartEventInterface;
@@ -48,6 +49,7 @@ class BpmnEngine implements EngineInterface
         $this->uid = uniqid();
         $this->repository = $repository;
         $this->dispatcher = $dispatcher;
+        $this->setDataStore(new GlobalDataStore());
     }
 
     /**
@@ -75,6 +77,11 @@ class BpmnEngine implements EngineInterface
     public function getRepository()
     {
         return $this->repository;
+    }
+
+    public function getExecutionInstances()
+    {
+        return $this->executionInstances;
     }
 
     /**
@@ -113,6 +120,7 @@ class BpmnEngine implements EngineInterface
         $key = $processVersion->getKey();
         if (!isset($this->definitions[$key])) {
             $this->definitions[$key] = $processVersion->getDefinitions(false, $this);
+            $this->loadProcessDefinitions($this->definitions[$key]);
         }
         return $this->definitions[$key];
     }

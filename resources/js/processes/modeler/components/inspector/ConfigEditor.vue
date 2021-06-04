@@ -16,7 +16,7 @@
             </div>
             <div slot="modal-footer">
                 <b-button @click="closePopup" class="btn btn-secondary">
-                    {{ $t('CLOSE') }}
+                    {{ $t('Close') }}
                 </b-button>
             </div>
 
@@ -30,7 +30,7 @@
     export default {
         props: ["value", "label", "helper", "property"],
         data() {
-            const node = this.$parent.$parent.$parent.$parent.highlightedNode.definition;
+            const node = this.$root.$children[0].$refs.modeler.highlightedNode.definition;
             return {
                 monacoOptions: {
                     automaticLayout: true,
@@ -39,7 +39,7 @@
                 monacoLargeOptions: {
                     automaticLayout: true,
                 },
-                code: _.get(node, this.property),
+                code: _.get(node, this.property, ''),
                 showPopup: false,
             };
         },
@@ -48,9 +48,8 @@
                 this.code = this.propertyGetter;
             },
             code() {
-                const node = this.$parent.$parent.$parent.$parent.highlightedNode.definition;
+                const node = this.$root.$children[0].$refs.modeler.highlightedNode.definition;
                 _.set(node, this.property, this.code);
-                this.$emit('input', this.value);
             },
         },
         computed: {
@@ -58,7 +57,7 @@
              * Get the value of the edited property
              */
             propertyGetter() {
-                const node = this.$parent.$parent.$parent.$parent.highlightedNode.definition;
+                const node = this.$root.$children[0].$refs.modeler.highlightedNode.definition;
                 const value = _.get(node, this.property);
                 return value;
             }

@@ -6,7 +6,6 @@
     </b-card>
     <uploader
       v-else
-      :key="renderKey"
       :options="options"
       :attrs="attrs"
       ref="uploader"
@@ -21,13 +20,14 @@
       <uploader-drop id="uploaderMain" class="form-control-file">
         <p>{{ $t('Drop a file here to upload or') }}</p>
         <uploader-btn id="submitFile" class="btn btn-secondary text-white">{{ $t('select file') }}</uploader-btn>
+        <span v-if="config && config.validation === 'required' && !value" class="required">{{ $t('Required') }}</span>
       </uploader-drop>
 
       <uploader-list>
         <template slot-scope="{ fileList }">
           <ul>
             <li v-if="fileList.length === 0 && value">
-              <i class="fas fa-paperclip"></i> {{ value }}
+              <i class="fas fa-paperclip"></i> {{ displayName }}
             </li>
             <li v-for="file in fileList" :key="file.id">
               <uploader-file :file="file" :list="true"></uploader-file>
@@ -52,7 +52,7 @@ const uniqIdsMixin = createUniqIdsMixin();
 export default {
   components: uploader,
   mixins: [uniqIdsMixin],
-  props: ["label", "error", "helper", "name", "value", "controlClass", "endpoint", "accept"],
+  props: ["label", "error", "helper", "name", "value", "controlClass", "endpoint", "accept", "validation", "parent", "index", "config"],
   beforeMount() {
     this.getFileType();
   },
@@ -60,21 +60,26 @@ export default {
     this.removeDefaultClasses();
   },
   mounted() {
-    this.removeDefaultClasses();
+    this.$root.$on('set-upload-data-name',
+        (recordList, index, id) => this.listenRecordList(recordList, index, id));
 
-    // If we're in a record list, this will fire to give us the prefix
-    this.$root.$on('set-upload-data-name', (recordList, index) => {
-      if (index === null) {
-        // Adding new record
-        index = recordList.value ? recordList.value.length : 0;
-      }
-      const prefix = recordList.name + "." + index.toString() + ".";
-      this.setFileUploadNameForChildren(recordList.$children, prefix);
-    })
+    this.removeDefaultClasses();
+    
+    this.checkIfInRecordList();
+
+    this.setPrefix();
+    if (this.$refs['uploader']) {
+      this.$refs['uploader'].$forceUpdate();
+    }
   },
   computed: {
-    renderKey() {
-      return this.prefix + this.name;
+    displayName() {
+      const requestFiles = _.get(window, 'PM4ConfigOverrides.requestFiles', {});
+      const fileInfo = requestFiles[this.fileDataName];
+      if (fileInfo) {
+        return fileInfo.file_name;
+      }
+      return this.value.name ? this.value.name : this.value;
     },
     mode() {
       return this.$root.$children[0].mode;
@@ -99,18 +104,42 @@ export default {
         accept.push(item.trim())
       });
       return accept;
+    },
+    // return  the file's identifier in PM4ConfigOverrides.requestFiles
+    fileDataName() {
+      return this.prefix + this.name + (this.row_id ? '.' + this.row_id : '');
     }
+
   },
   watch: {
     name: {
       handler() {
-        this.options.query.data_name = this.prefix + this.name;
+        this.options.query.data_name = this.fileDataName;
+      },
+      immediate: true,
+    },
+    parent: {
+      handler() {
+        this.options.query.parent = this.parent;
       },
       immediate: true,
     },
     prefix: {
       handler() {
-        this.options.query.data_name = this.prefix + this.name;
+        this.options.query.data_name = this.fileDataName;
+      },
+      immediate: true,
+    },
+    index: {
+      handler() {
+        this.options.query.index = this.index || 0;
+      },
+      immediate: true,
+    },
+    row_id: {
+      handler() {
+        this.options.query.row_id = this.row_id;
+        this.options.query.data_name = this.prefix + this.name + (this.row_id ? '.' + this.row_id : '');
       },
       immediate: true,
     },
@@ -124,13 +153,17 @@ export default {
         errors: [],
       },
       prefix: '',
+      row_id: null,
       options: {
         target: this.getTargetUrl,
         // We cannot increase this until laravel chunk uploader handles this gracefully
         simultaneousUploads: 1,
         query: {
           chunk: true,
-          data_name: this.name
+          data_name: this.name,
+          parent: null,
+          index: 0,
+          row_id: null
         },
         testChunks: false,
         // Setup our headers to deal with API calls
@@ -146,6 +179,37 @@ export default {
     };
   },
   methods: {
+    listenRecordList(recordList, index, id) {
+      const parent =  this.$parent.$parent.$parent;
+      if (parent === recordList) {
+        this.row_id = id;
+      }
+      else {
+        this.row_id = null;
+      }
+      this.$forceUpdate();
+    },
+    setPrefix() {
+      let parent = this.$parent;
+      let i = 0;
+      while(!parent.loopContext) {
+        parent = parent.$parent;
+
+        if (parent === this.$root) {
+          parent = null;
+          break;
+        }
+
+        i++;
+        if (i > 100) {
+          throw "Loop Error";
+        }
+      }
+
+      if (parent && parent.loopContext) {
+        this.prefix = parent.loopContext + '.';
+      }
+    },
     setFileUploadNameForChildren(children, prefix) {
       children.forEach(child => {
         if (_.get(child, '$options.name') === 'FileUpload') {
@@ -167,6 +231,9 @@ export default {
         }
       }
       file.ignored = false;
+      if (!this.name) {
+        this.options.query.data_name = file.name
+      }
       return true;
     },
     removeDefaultClasses() {
@@ -186,7 +253,16 @@ export default {
     },
     fileUploaded(rootFile, file, message) {
       if (this.fileType == 'request') {
-        this.$emit("input", file.name);
+        let id = '';
+        if (message) {
+          const msgObj = JSON.parse(message);
+          if (!_.has(window, 'PM4ConfigOverrides.requestFiles')) {
+            window.PM4ConfigOverrides.requestFiles = {};
+          }
+          window.PM4ConfigOverrides.requestFiles[this.fileDataName] = { id:msgObj.fileUploadId, file_name:file.name };
+          id = msgObj.fileUploadId;
+        }
+        this.$emit("input", id);
       }
 
       if (this.fileType == 'collection') {
@@ -215,6 +291,10 @@ export default {
       };
     },
     getTargetUrl() {
+      if (_.has(window, 'PM4ConfigOverrides.postFileEndpoint')) {
+        return window.PM4ConfigOverrides.postFileEndpoint;
+      }
+      
       if (this.endpoint) {
         return this.endpoint;
       }
@@ -240,7 +320,22 @@ export default {
             'collection'
           : null;
       }
+    },
+    checkIfInRecordList() {
+      const parent =  this.$parent.$parent.$parent;
+      if (parent.$options._componentTag == 'FormRecordList') {
+        const recordList = parent;
+        const prefix = recordList.name + '.';
+        this.setFileUploadNameForChildren(recordList.$children, prefix);
+      }
     }
   }
 };
 </script>
+
+<style scoped>
+.required {
+  color: red;
+  font-size: 0.8em;
+}
+</style>

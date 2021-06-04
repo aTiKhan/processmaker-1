@@ -2,12 +2,15 @@
 
 namespace ProcessMaker\Http\Controllers\Api;
 
+use Comment as GlobalComment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use ProcessMaker\Http\Controllers\Controller;
 use ProcessMaker\Http\Resources\ApiCollection;
 use ProcessMaker\Http\Resources\Comment as CommentResource;
 use ProcessMaker\Models\Comment;
+use ProcessMaker\Models\ProcessRequest;
+use ProcessMaker\Models\ProcessRequestToken;
 
 class CommentController extends Controller
 {
@@ -34,7 +37,8 @@ class CommentController extends Controller
     public function index(Request $request)
     {
         $query = Comment::query()
-            ->with('user');
+            ->with('user')
+            ->with('children');
 
         $flag = 'visible';
         if (\Auth::user()->is_administrator) {
@@ -43,18 +47,33 @@ class CommentController extends Controller
         $query->hidden($flag);
 
         $commentable_id = $request->input('commentable_id', null);
-        if ($commentable_id) {
-            $query->where('commentable_id', $commentable_id);
-        }
-
         $commentable_type = $request->input('commentable_type', null);
-        if ($commentable_type) {
-            $query->where('commentable_type', $commentable_type);
+
+        // from a request return comments for the request and their taks 
+        if ($commentable_type === ProcessRequest::class && $commentable_id) {
+            $requestTokens = ProcessRequestToken::where('process_request_id', $commentable_id)->get();
+            $tokenIds = $requestTokens->pluck('id');
+            $query->where(function ($query) use($commentable_id) {
+                $query->where('commentable_type', ProcessRequest::class)
+                        ->where('commentable_id', $commentable_id);
+            })->orWhere(function ($query) use($tokenIds) {
+                $query->where('commentable_type', ProcessRequestToken::class)
+                        ->whereIn('commentable_id', $tokenIds);
+            });
+        }
+        else {
+            if ($commentable_type) {
+                $query->where('commentable_type', $commentable_type);
+            }
+
+            if ($commentable_id) {
+                $query->where('commentable_id', $commentable_id);
+            }
         }
 
         $response =
             $query->orderBy(
-                $request->input('order_by', 'updated_at'),
+                $request->input('order_by', 'created_at'),
                 $request->input('order_direction', 'ASC')
             )->paginate($request->input('per_page', 100));
 
@@ -130,6 +149,11 @@ class CommentController extends Controller
      */
     public function destroy(Comment $comment)
     {
+        //delete related comments
+        Comment::where('commentable_id', $comment->getKey())
+            ->where('commentable_type', Comment::class)
+            ->delete();
+
         $comment->delete();
         return response([], 204);
     }

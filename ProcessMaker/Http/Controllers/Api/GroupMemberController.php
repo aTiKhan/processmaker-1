@@ -3,13 +3,14 @@
 namespace ProcessMaker\Http\Controllers\Api;
 
 use Illuminate\Http\Request;
+use ProcessMaker\Models\User;
+use ProcessMaker\Models\Group;
 use Illuminate\Support\Facades\Auth;
+use ProcessMaker\Models\GroupMember;
 use ProcessMaker\Http\Controllers\Controller;
 use ProcessMaker\Http\Resources\ApiCollection;
+use Illuminate\Auth\Access\AuthorizationException;
 use ProcessMaker\Http\Resources\GroupMembers as GroupMemberResource;
-use ProcessMaker\Models\Group;
-use ProcessMaker\Models\GroupMember;
-use ProcessMaker\Models\User;
 
 class GroupMemberController extends Controller
 {
@@ -61,6 +62,10 @@ class GroupMemberController extends Controller
      */
     public function index(Request $request)
     {
+        if (!(Auth::user()->can('view-groups') || Auth::user()->can('view-users'))) {
+            throw new AuthorizationException(__('Not authorized to view groups.'));
+        }
+
         $query = GroupMember::query()
             ->join('groups', 'groups.id', '=', 'group_members.group_id')
             ->select('group_members.*', 'groups.name', 'groups.description');
@@ -255,6 +260,7 @@ class GroupMemberController extends Controller
      */
     public function groupsAvailable(Request $request)
     {
+        $group_id = $request->input('group_id', null);
         $member_id = $request->input('member_id', null);
         $member_type = $request->input('member_type', null);
         $assignedResult = collect([]);
@@ -272,7 +278,12 @@ class GroupMemberController extends Controller
         }
 
         $members = [];
-        if ($member_id && $member_type) {
+        if ($group_id) {
+            $members = GroupMember::where('member_type', Group::class)
+                ->where('group_id', $group_id)
+                ->get()->pluck('member_id');
+            $members->push($group_id);
+        } elseif ($member_id && $member_type) {
             //Load groups already assigned.
             $members = GroupMember::where('member_type', $member_type)
                 ->where('member_id', $member_id)
@@ -381,7 +392,8 @@ class GroupMemberController extends Controller
             }
         }
 
-        $query = User::where('status', 'ACTIVE')
+        $query = User::nonSystem()
+            ->where('status', '!=', 'INACTIVE')
             ->whereNotIn('id', $members);
 
         $filter = $request->input('filter', '');

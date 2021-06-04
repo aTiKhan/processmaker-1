@@ -66,6 +66,7 @@ class PermissionSeeder extends Seeder
             'delete-users',
             'edit-users',
             'view-users',
+            'view-other-users-profiles',
         ],
         'Requests' => [
             'view-all_requests',
@@ -96,20 +97,24 @@ class PermissionSeeder extends Seeder
             'edit-auth_clients',
             'delete-auth_clients',
         ],
+        'Signals' => [
+            'create-signals',
+            'view-signals',
+            'edit-signals',
+            'delete-signals',
+        ],
     ];
 
     public function run($seedUser = null)
     {
-        if (Permission::count() === 0) {
-            foreach ($this->permissionGroups as $groupName => $permissions) {
-                foreach ($permissions as $permissionString) {
-                    $permission = factory(Permission::class)->create([
-                        'title' => ucwords(preg_replace('/(\-|_)/', ' ',
-                                $permissionString)),
-                        'name' => $permissionString,
-                        'group' => $groupName,
-                    ]);
-                }
+        foreach ($this->permissionGroups as $groupName => $permissions) {
+            foreach ($permissions as $permissionString) {
+                Permission::updateOrCreate([
+                    'name' => $permissionString,
+                ],[
+                    'title' => ucwords(preg_replace('/(\-|_)/', ' ', $permissionString)),
+                    'group' => $groupName,
+                ]);
             }
         }
 

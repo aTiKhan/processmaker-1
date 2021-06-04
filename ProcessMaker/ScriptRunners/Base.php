@@ -62,13 +62,17 @@ abstract class Base
     {
         // Prepare the docker parameters
         $environmentVariables = $this->getEnvironmentVariables();
-    
+        if (!getenv('HOME')) {
+            putenv('HOME=' . base_path());
+        }
+
         // Create tokens for the SDK if a user is set
         $token = null;
         if ($user) {
             $token = new GenerateAccessToken($user);
             $environmentVariables[] = 'API_TOKEN=' . $token->getToken();
             $environmentVariables[] = 'API_HOST=' . config('app.url') . '/api/1.0';
+            $environmentVariables[] = 'APP_URL=' . config('app.url');
             $environmentVariables[] = 'API_SSL_VERIFY=' . (config('app.api_ssl_verify') ? '1' : '0');
         }
 
@@ -115,10 +119,10 @@ abstract class Base
         $returnCode = $response['returnCode'];
         $stdOutput = $response['output'];
         $output = $response['outputs']['response'];
-        \Log::debug("Docker returned: " . json_encode($response));
+        \Log::debug("Docker returned: " . substr(json_encode($response), 0, 500));
         if ($returnCode || $stdOutput) {
             // Has an error code
-            throw new RuntimeException(implode("\n", $stdOutput));
+            throw new RuntimeException("(Code: {$returnCode})" . implode("\n", $stdOutput));
         } else {
             // Success
             $response = json_decode($output, true);

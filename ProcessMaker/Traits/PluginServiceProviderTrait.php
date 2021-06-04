@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\File;
 use ProcessMaker\Events\ModelerStarting;
 use ProcessMaker\Events\ScriptBuilderStarting;
 use Illuminate\Support\Facades\Event;
+use ProcessMaker\Managers\IndexManager;
+use ProcessMaker\Managers\LoginManager;
 use ProcessMaker\Managers\PackageManager;
 
 /**
@@ -99,6 +101,37 @@ trait PluginServiceProviderTrait
     protected function registerPackage($package)
     {
         App::make(PackageManager::class)->addPackage($package);
+    }
+
+    /**
+     * Register index
+     *
+     * @param $name string name of index
+     * @param $model string path of model
+     * @param $callback callback function to perform indexing
+     */
+    protected function registerIndex($name, $model, $callback)
+    {
+        App::make(IndexManager::class)->add($name, $model, $callback);
+    }
+    
+    /**
+     * Register login addon
+     *
+     * @param $name string name of view file
+     * @param $data array data to pass to the view
+     */
+    protected function registerLoginAddon($view, $data = [])
+    {
+        App::make(LoginManager::class)->add($view, $data);
+    }
+    
+    /**
+     * Do not display standard login form
+     */
+    protected function blockStandardLogin()
+    {
+        App::make(LoginManager::class)->block();
     }
 
     /**

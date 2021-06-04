@@ -1,4 +1,6 @@
 import Vue from "vue";
+import CounterCard from "./components/CounterCard";
+import CounterCardGroup from "./components/CounterCardGroup";
 import RequestsListing from "./components/RequestsListing";
 import Multiselect from 'vue-multiselect'
 import AdvancedSearch from "../components/AdvancedSearch";
@@ -13,7 +15,7 @@ new Vue({
         requester: [],
     },
     el: "#requests-listing",
-    components: { RequestsListing, Multiselect, AdvancedSearch },
+    components: { CounterCard, CounterCardGroup, RequestsListing, Multiselect, AdvancedSearch },
     created() {
       let params = {};
 
@@ -32,10 +34,17 @@ new Vue({
       
       if (status) {
         this.status.push({
-          name: this.$t(status),
+          name: status,
           value: status
         });
       }
+
+      //translate status labels when available
+      window.ProcessMaker.i18nPromise.then(() => {
+        this.status.forEach(item => {
+          item.name = this.$t(item.name);
+        });
+      });
     },
     methods: {
       onChange: function(query) {

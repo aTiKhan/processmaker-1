@@ -2,6 +2,7 @@
 
 namespace ProcessMaker\Models;
 
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Model;
 use ProcessMaker\Traits\SerializeToIso8601;
 use ProcessMaker\Traits\SqlsrvSupportTrait;
@@ -13,6 +14,8 @@ use ProcessMaker\Traits\SqlsrvSupportTrait;
  * @property integer 'user_id',
  * @property integer 'commentable_id',
  * @property string 'commentable_type',
+ * @property integer 'up',
+ * @property integer 'down',
  * @property string 'subject',
  * @property string 'body',
  * @property boolean 'hidden',
@@ -26,6 +29,8 @@ use ProcessMaker\Traits\SqlsrvSupportTrait;
  *   @OA\Property(property="user_id", type="string", format="id"),
  *   @OA\Property(property="commentable_id", type="string", format="id"),
  *   @OA\Property(property="commentable_type", type="string"),
+ *   @OA\Property(property="up", type="integer"),
+ *   @OA\Property(property="down", type="integer"),
  *   @OA\Property(property="subject", type="string"),
  *   @OA\Property(property="body", type="string"),
  *   @OA\Property(property="hidden", type="boolean"),
@@ -43,11 +48,17 @@ class Comment extends Model
 {
     use SerializeToIso8601;
     use SqlsrvSupportTrait;
+    use SoftDeletes;
 
     protected $connection = 'data';
 
     protected $fillable = [
         'user_id', 'commentable_id', 'commentable_type', 'subject', 'body', 'hidden', 'type'
+    ];
+
+    protected $casts = [
+        'up' => 'array',
+        'down' => 'array',
     ];
 
     public static function rules()
@@ -103,4 +114,13 @@ class Comment extends Model
         return $this->belongsTo(User::class);
     }
 
+    /**
+     * Children comments with user
+     */
+    public function children()
+    {
+        return $this->hasMany(Comment::class, 'commentable_id', 'id')
+            ->where('commentable_type', Comment::class)
+            ->with('user');
+    }
 }

@@ -62,7 +62,7 @@
                             </div>
                             <category-select :label="$t('Category')" api-get="script_categories"
                                              api-list="script_categories" v-model="script_category_id"
-                                             :errors="addError.script_category_id">
+                                             :errors="addError.script_category_id" ref="categorySelect">
                             </category-select>
                             <div class="form-group">
                                 {!!Form::label('script_executor_id', __('Language'))!!}<small class="ml-1">*</small>
@@ -96,6 +96,13 @@
                                     {{ __('Enter how many seconds the Script runs before timing out (0 is unlimited).') }}
                                 </small>
                             </div>
+                            <component
+                                v-for="(cmp,index) in createScriptHooks"
+                                :key="`create-script-hook-${index}`"
+                                :is="cmp"
+                                :script="script"
+                                ref="createScriptHooks"
+                            ></component>
                         </div>
                     @else
                         <div class="modal-body">
@@ -125,7 +132,7 @@
 
     @can('create-scripts')
         <script>
-          new Vue({
+          window.DesignerScripts = new Vue({
             el: '#addScript',
             data: {
               title: '',
@@ -139,6 +146,8 @@
               users: [],
               timeout: 60,
               disabled: false,
+              createScriptHooks: [],
+              script: null,
             },
             methods: {
               onClose() {
@@ -150,6 +159,7 @@
                 this.code = '';
                 this.timeout = 60;
                 this.addError = {};
+                this.$refs.categorySelect.resetUncategorized();
               },
               onSubmit() {
                 this.errors = Object.assign({}, {
@@ -174,12 +184,17 @@
                 })
                   .then(response => {
                     ProcessMaker.alert('{{__('The script was created.')}}', 'success');
+                    (this.$refs.createScriptHooks || []).forEach(hook => {
+                      hook.onsave(response.data);
+                    });
                     window.location = "/designer/scripts/" + response.data.id + "/builder";
                   })
                   .catch(error => {
                     this.disabled = false;
-                    if (error.response.status && error.response.status === 422) {
+                    if (_.get(error, 'response.status') === 422) {
                       this.addError = error.response.data.errors;
+                    } else {
+                        throw error;
                     }
                   })
               }

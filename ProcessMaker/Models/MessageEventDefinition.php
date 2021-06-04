@@ -7,6 +7,7 @@ use ProcessMaker\Nayra\Contracts\Bpmn\EventDefinitionInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\FlowNodeInterface;
 use ProcessMaker\Nayra\Contracts\Engine\ExecutionInstanceInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\TokenInterface;
+use ProcessMaker\Models\ProcessCollaboration;
 
 /**
  * Implementation of the message element.
@@ -27,14 +28,28 @@ class MessageEventDefinition extends Base
      */
     public function execute(EventDefinitionInterface $event, FlowNodeInterface $target, ExecutionInstanceInterface $targetRequest = null, TokenInterface $token = null)
     {
-        $sourceRequest = $token->processRequest;
-        $payloadData = $this->getPayload()->getData($sourceRequest);
-        $storage = $targetRequest->getDataStore();
-        $data = $storage->getData();
-        foreach ($payloadData as $key => $value) {
-            $data[$key] = $value;
+        // Set collaboration
+        $parent = $token ? $token->getInstance() : null;
+        $child = $targetRequest;
+
+        if ($parent && $child) {
+            $collaboration_id = $parent->process_collaboration_id ?: $child->process_collaboration_id;
+            if (!$collaboration_id) {
+                $collaboration = new ProcessCollaboration();
+                $collaboration->process_id = $parent->process->getKey();
+                $collaboration->saveOrFail();
+                $collaboration_id = $collaboration->getKey();
+            }
+            if (!$parent->process_collaboration_id) {
+                $parent->process_collaboration_id = $collaboration_id;
+                $parent->saveOrFail();
+            }
+            if (!$child->process_collaboration_id) {
+                $child->process_collaboration_id = $collaboration_id;
+                $child->saveOrFail();
+            }
         }
-        $storage->setData($data);
+        
         return $this;
     }
 }

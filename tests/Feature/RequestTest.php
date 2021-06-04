@@ -119,9 +119,18 @@ class RequestTest extends TestCase
     public function testShowMediaFiles()
     {
         $process_request = factory(ProcessRequest::class)->create();
-        $file_1 = $process_request->addMedia(File::image('photo1.jpg'))->toMediaCollection();
-        $file_2 = $process_request->addMedia(File::image('photo2.jpg'))->toMediaCollection();
-        $file_3 = $process_request->addMedia(File::image('photo3.jpg'))->toMediaCollection();
+        $file_1 = $process_request
+            ->addMedia(File::image('photo1.jpg'))
+            ->withCustomProperties(['data_name' => 'test'])
+            ->toMediaCollection();
+        $file_2 = $process_request
+            ->addMedia(File::image('photo2.jpg'))
+            ->withCustomProperties(['data_name' => 'test'])
+            ->toMediaCollection();
+        $file_3 = $process_request
+            ->addMedia(File::image('photo3.jpg'))
+            ->withCustomProperties(['data_name' => 'test'])
+            ->toMediaCollection();
 
         $response = $this->webCall('GET', '/requests/' . $process_request->id);
         // Full request->getMedia payload is sent for Vue, so assert some HTML also
@@ -142,8 +151,7 @@ class RequestTest extends TestCase
             'status' => 'CANCELED',
         ]);
 
-        $response = $this->webCall('GET', '/requests/completed');
-        $crawler = new Crawler($response->getContent());
-        $this->assertContains('2', trim($crawler->filter('.bg-primary h1')->first()->text()));
+        $response = $this->apiCall('GET', '/requests?total=true&pmql=(status = "Completed")');
+        $response->assertJson(['meta' => ['total' => 2]]);
     }
 }

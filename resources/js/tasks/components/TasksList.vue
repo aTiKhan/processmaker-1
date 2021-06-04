@@ -1,7 +1,7 @@
 <template>
   <div class="data-table">
     <data-loading
-      :for=/tasks\?page/
+      :for=/tasks\?page|results\?page/
       v-show="shouldShowLoader"
       :empty="$t('Congratulations')"
       :empty-desc="$t('You don\'t currently have any tasks assigned to you')"
@@ -20,9 +20,6 @@
         pagination-path="meta"
         ref="vuetable"
       >
-        <template slot="ids" slot-scope="props">
-          <b-link :href="onAction('edit', props.rowData, props.rowIndex)">#{{props.rowData.id}}</b-link>
-        </template>
         <template slot="name" slot-scope="props">
           <b-link
             :href="onAction('edit', props.rowData, props.rowIndex)"
@@ -102,7 +99,14 @@ Vue.component("avatar-image", AvatarImage);
 
 export default {
   mixins: [datatableMixin, dataLoadingMixin],
-  props: ["filter", "columns", "pmql"],
+  props: {
+    filter: {},
+    columns: {},
+    pmql: {},
+    savedSearch: {
+      default: false
+    }
+  },
   data() {
     return {
       orderBy: "ID",
@@ -115,8 +119,18 @@ export default {
           direction: "DESC"
         }
       ],
-      fields: []
+      fields: [],
+      previousFilter: ""
     };
+  },
+  computed: {
+    endpoint() {
+      if (this.savedSearch !== false) {
+        return `saved-searches/${this.savedSearch}/results`;
+      }
+      
+      return 'tasks';
+    },
   },
   mounted: function mounted() {
     this.setupColumns();
@@ -136,10 +150,6 @@ export default {
         };
         
         switch (column.field) {
-          case 'id':
-            field.name = '__slot:ids';
-            field.title = '#';
-            break;
           case 'task':
             field.name = '__slot:name';
             field.field = 'element_name';
@@ -170,6 +180,10 @@ export default {
         if (! field.field) {
           field.field = column.field;
         }
+
+        if (column.format === 'datetime' || column.format === 'date') {
+          field.callback = 'formatDate';
+        }
               
         if (column.sortable && ! field.sortField) {
           field.sortField = column.field;
@@ -193,12 +207,6 @@ export default {
         return this.$props.columns;
       } else {
         let columns = [
-          {
-            "label": "#",
-            "field": "id",
-            "sortable": true,
-            "default": true
-          },
           {
             "label": "Task",
             "field": "task",
@@ -308,7 +316,7 @@ export default {
       }
     },
 
-    fetch(query) {
+    fetch() {
         Vue.nextTick(() => {
             if (this.cancelToken) {
               this.cancelToken();
@@ -323,30 +331,39 @@ export default {
             }
 
             let filter = this.filter;
+            let filterParams = '';
             
-            if (query && query.length) {
-              if (query.isPMQL()) {
-                pmql = `(${pmql}) and (${query})`;
+            if (filter && filter.length) {
+              if (filter.isPMQL()) {
+                pmql = `(${pmql}) and (${filter})`;
+                filter = '';
               } else {
-                filter = query;
+                let filterParams =
+                    "&user_id=" +
+                    window.ProcessMaker.user.id +
+                    "&filter=" +
+                    filter +
+                    "&statusfilter=ACTIVE,CLOSED";
               }
             }
+
+            if (this.previousFilter !== filter) {
+              this.page = 1;
+            }
+
+            this.previousFilter = filter;
             
             // Load from our api client
             ProcessMaker.apiClient
               .get(
-                "tasks?page=" +
+                `${this.endpoint}?page=` +
                   this.page +
                   "&include=process,processRequest,processRequest.user,user,data" +
                   "&pmql=" +
                   encodeURIComponent(pmql) +
                   "&per_page=" +
                   this.perPage +
-                  "&user_id=" +
-                  window.ProcessMaker.user.id +
-                  "&filter=" +
-                  filter +
-                  "&statusfilter=ACTIVE,CLOSED" +
+                  filterParams +
                   this.getSortParam(),
                 {
                   cancelToken: new CancelToken(c => {

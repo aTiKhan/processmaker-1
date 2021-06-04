@@ -31,12 +31,15 @@
                            aria-controls="nav-profile" aria-selected="false">{{__('Permissions')}}</a>
                         <a class="nav-item nav-link" id="nav-tokens-tab" data-toggle="tab" href="#nav-tokens" role="tab"
                            aria-controls="nav-tokens" aria-selected="false">{{__('API Tokens')}}</a>
-
+                        @can('view-security-logs')
+                            <a class="nav-item nav-link" id="nav-logs-tab" data-toggle="tab" href="#nav-logs" role="tab"
+                               aria-controls="nav-logs" aria-selected="false">{{__('Security Logs')}}</a>
+                        @endcan
                     </div>
                 </nav>
                 <div class="container mt-0 border-top-0 p-3 card card-body">
                     <div class="tab-content" id="nav-tabContent">
-                        <div class="tab-pane fade show active" id="nav-home" role="tabpanel"
+                        <div class="tab-pane show active" id="nav-home" role="tabpanel"
                              aria-labelledby="nav-home-tab">
                             <div class="d-flex flex-column flex-lg-row">
                                 <div class="flex-grow-1">
@@ -48,10 +51,10 @@
                             </div>
                             <div class="d-flex justify-content-end mt-3">
                                 {!! Form::button(__('Cancel'), ['class'=>'btn btn-outline-secondary', '@click' => 'onClose']) !!}
-                                {!! Form::button(__('Save'), ['class'=>'btn btn-secondary ml-3', '@click' => 'profileUpdate']) !!}
+                                {!! Form::button(__('Save'), ['class'=>'btn btn-secondary ml-3', '@click' => 'profileUpdate','id'=>'saveUser']) !!}
                             </div>
                         </div>
-                        <div class="tab-pane fade show" id="nav-groups" role="tabpanel"
+                        <div class="tab-pane show" id="nav-groups" role="tabpanel"
                              aria-labelledby="nav-groups-tab">
                              <div class="input-group w-100 mb-3">
                                  <input v-model="userGroupsFilter" class="form-control" placeholder="{{__('Search')}}">
@@ -69,10 +72,10 @@
                             </div>
                             <div class="d-flex justify-content-end mt-3">
                                 {!! Form::button(__('Cancel'), ['class'=>'btn btn-outline-secondary', '@click' => 'onClose']) !!}
-                                {!! Form::button(__('Save'), ['class'=>'btn btn-secondary ml-3', '@click' => 'onSaveGroups']) !!}
+                                {!! Form::button(__('Save'), ['class'=>'btn btn-secondary ml-3', '@click' => 'onSaveGroups','id'=>'saveGroups']) !!}
                             </div>
                         </div>
-                        <div class="tab-pane fade" id="nav-profile" role="tabpanel" aria-labelledby="nav-profile-tab">
+                        <div class="tab-pane" id="nav-profile" role="tabpanel" aria-labelledby="nav-profile-tab">
                             <div class="accordion" id="accordionPermissions">
                                 <div class="mb-2 custom-control custom-switch">
                                     <input v-model="formData.is_administrator" type="checkbox" class="custom-control-input" id="is_administrator" @input="adminHasChanged = true">
@@ -85,11 +88,11 @@
                                 @include('admin.shared.permissions')
                                 <div class="d-flex justify-content-end mt-3">
                                     {!! Form::button(__('Cancel'), ['class'=>'btn btn-outline-secondary', '@click' => 'onClose'])!!}
-                                    {!! Form::button(__('Save'), ['class'=>'btn btn-secondary ml-3', '@click' => 'permissionUpdate'])!!}
+                                    {!! Form::button(__('Save'), ['class'=>'btn btn-secondary ml-3', '@click' => 'permissionUpdate','id'=>'savePermissions'])!!}
                                 </div>
                             </div>
                         </div>
-                        <div class="tab-pane fade" id="nav-tokens" role="tabpanel" aria-labelledby="nav-tokens-tab">
+                        <div class="tab-pane" id="nav-tokens" role="tabpanel" aria-labelledby="nav-tokens-tab">
                             <div>
                                 <div class="d-flex justify-content-end mb-3">
                                     <button type="button" class="btn btn-secondary" @click="generateToken">
@@ -137,6 +140,13 @@
                                 </div>
                             </div>
                         </div>
+                        @can('view-security-logs')
+                          <div class="tab-pane" id="nav-logs" role="tabpanel" aria-labelledby="nav-logs-tab">
+                              <div>
+                                  <security-logs-listing :user-id="@json($user->id)"></security-logs-listing>
+                              </div>
+                          </div>
+                        @endcan
                     </div>
                 </div>
             </div>
@@ -162,13 +172,16 @@
                                 {{__('Browse')}}
                             </button>
                         </div>
+                        <div align="center">
+                            {{__('Image types accepted: .gif, .jpg, .jpeg, .png')}}
+                        </div>
                         <vue-croppie :style="{display: (image) ? 'block' : 'none' }" ref="croppie"
                                      :viewport="{ width: 380, height: 380, type: 'circle' }"
                                      :boundary="{ width: 400, height: 400 }" :enable-orientation="false"
                                      :enable-resize="false">
                         </vue-croppie>
                     </div>
-                    <input type="file" class="custom-file-input" ref="customFile" @change="onFileChange">
+                    <input type="file" class="custom-file-input" accept=".gif,.jpg,.jpeg,.png,image/jpeg,image/gif,image/png" ref="customFile" @change="onFileChange">
                 </div>
 
                 <div class="modal-footer">
@@ -191,6 +204,7 @@
     <script>
       var modalVueInstance = new Vue({
         el: '#updateAvatarModal',
+        mixins:addons,
         data() {
           return {
             image: "",
@@ -258,9 +272,11 @@
 
     <script>
       var formVueInstance = new Vue({
+        mixins:addons,
         el: '#editUser',
         data() {
           return {
+            meta: @json(config('users.properties')),
             formData: @json($user),
             langs: @json($availableLangs),
             timezones: @json($timezones),
@@ -299,6 +315,17 @@
         },
         created() {
           this.hasPermission()
+          if (this.meta) {
+            let keys = Object.keys(this.meta);
+            if (!this.formData.meta) {
+                this.formData.meta = {};
+            }
+            keys.forEach(key => {
+               if (!this.formData.meta[key]) {
+                   this.formData.meta[key] = null;
+               }
+            });
+          }
         },
         computed: {
           isCurrentUser() {
@@ -388,7 +415,7 @@
           profileUpdate($event) {
             this.resetErrors();
             if (!this.validatePassword()) return false;
-            ProcessMaker.apiClient.put('users/' + this.formData.id, this.formData, {context: this})
+            ProcessMaker.apiClient.put('users/' + this.formData.id, this.formData)
               .then(response => {
                 ProcessMaker.alert('{{__('User Updated Successfully ')}}', 'success');
                 window.ProcessMaker.events.$emit('update-profile-avatar');
@@ -407,6 +434,9 @@
             })
               .then(response => {
                 ProcessMaker.alert('{{__('User Permissions Updated Successfully ')}}', 'success');
+                if (this.userId === this.currentUserId) {
+                  ProcessMaker.alert('{{__('Please logout and login again to reflect permission changes')}}', 'warning');
+                }
               })
           },
           hasPermission() {

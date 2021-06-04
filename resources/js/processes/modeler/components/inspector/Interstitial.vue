@@ -34,7 +34,7 @@
         loading: false,
         error: '',
         parameters: {
-          type: 'DISPLAY'
+          type: 'DISPLAY',
         }
       };
     },
@@ -52,7 +52,7 @@
       },
 
       node () {
-        return this.$parent.$parent.$parent.$parent.highlightedNode.definition;
+        return this.$root.$children[0].$refs.modeler.highlightedNode.definition;
       }
     },
     watch: {

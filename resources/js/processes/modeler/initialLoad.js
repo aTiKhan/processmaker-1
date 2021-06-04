@@ -3,6 +3,7 @@
 import {
   association,
   endEvent,
+  terminateEndEvent,
   exclusiveGateway,
   inclusiveGateway,
   parallelGateway,
@@ -18,7 +19,9 @@ import {
   serviceTask,
   callActivity,
   eventBasedGateway,
-  intermediateMessageCatchEvent
+  intermediateMessageCatchEvent,
+  intermediateSignalThrowEvent,
+  signalEndEvent
 } from '@processmaker/modeler';
 import ModelerScreenSelect from './components/inspector/ScreenSelect';
 import UserSelect from './components/inspector/UserSelect';
@@ -28,12 +31,16 @@ import TaskNotifications from './components/inspector/TaskNotifications';
 import ExpressionEditor from './components/inspector/ExpressionEditor';
 import TaskAssignment from './components/inspector/TaskAssignment';
 import TaskDueIn from './components/inspector/TaskDueIn';
+import GatewayFlowVariable from './components/inspector/GatewayFlowVariable';
 import ConfigEditor from './components/inspector/ConfigEditor';
+import SignalPayload from './components/inspector/SignalPayload';
 import ScriptSelect from './components/inspector/ScriptSelect';
 import StartPermission from './components/inspector/StartPermission';
 import {registerNodes} from "@processmaker/modeler";
 import Interstitial from "./components/inspector/Interstitial";
 import SelectUserGroup from "../../components/SelectUserGroup";
+import validateScreenRef from './validateScreenRef';
+import i18next from 'i18next';
 
 Vue.component('UserSelect', UserSelect);
 Vue.component('UserById', UserById);
@@ -43,7 +50,9 @@ Vue.component('TaskNotifications', TaskNotifications);
 Vue.component('ExpressionEditor', ExpressionEditor);
 Vue.component('TaskAssignment', TaskAssignment);
 Vue.component('TaskDueIn', TaskDueIn);
+Vue.component('GatewayFlowVariable', GatewayFlowVariable);
 Vue.component('ConfigEditor', ConfigEditor);
+Vue.component('SignalPayload', SignalPayload);
 Vue.component('ScriptSelect', ScriptSelect);
 Vue.component('StartPermission', StartPermission);
 Vue.component("Interstitial", Interstitial);
@@ -67,6 +76,8 @@ let nodeTypes = [
   serviceTask,
   textAnnotation,
   intermediateMessageCatchEvent,
+  intermediateSignalThrowEvent,
+  signalEndEvent,
   eventBasedGateway,
 ];
 
@@ -84,7 +95,7 @@ ProcessMaker.EventBus.$on(
       container: true,
       config: {
         initiallyOpen: false,
-        label: 'Start Permissions',
+        label: i18next.t('Start Permissions'),
         icon: 'user-shield',
         name: 'permissions-accordion',
       },
@@ -118,9 +129,13 @@ ProcessMaker.EventBus.$on(
         helper: 'Select Screen to display this Task',
         name: 'screenRef',
         required: true,
-        type: 'FORM'
+        params: {
+          type: 'FORM',
+          interactive: true
+        }        
       }
     });
+
     registerInspectorExtension(task, {
       component: 'TaskDueIn',
       config: {
@@ -134,7 +149,7 @@ ProcessMaker.EventBus.$on(
       container: true,
       config: {
         initiallyOpen: false,
-        label: 'Assignment Rules',
+        label: i18next.t('Assignment Rules'),
         icon: 'users',
         name: 'assignments-accordion',
       },
@@ -142,7 +157,7 @@ ProcessMaker.EventBus.$on(
         {
           component: 'TaskAssignment',
           config: {
-            label: 'Task Assignment',
+            label: 'Assignment Type',
             helper: '',
             name: 'taskAssignment'
           }
@@ -154,7 +169,7 @@ ProcessMaker.EventBus.$on(
       container: true,
       config: {
         initiallyOpen: false,
-        label: 'Notifications',
+        label: i18next.t('Notifications'),
         icon: 'bell',
         name: 'notifications-accordion',
       },
@@ -207,6 +222,16 @@ ProcessMaker.EventBus.$on(
         params: { type: 'DISPLAY' }
       }
     });
+    registerInspectorExtension(terminateEndEvent, {
+      component: 'ModelerScreenSelect',
+      config: {
+        label: 'Summary Screen',
+        helper:
+          'Select Display-type Screen to show the summary of this Request when it completes',
+        name: 'screenRef',
+        params: { type: 'DISPLAY' }
+      }
+    });
     registerInspectorExtension(manualTask, {
       component: 'ModelerScreenSelect',
       config: {
@@ -231,7 +256,7 @@ ProcessMaker.EventBus.$on(
       container: true,
       config: {
         initiallyOpen: false,
-        label: 'Assignment Rules',
+        label: i18next.t('Assignment Rules'),
         icon: 'users',
         name: 'assignments-accordion',
       },
@@ -251,7 +276,7 @@ ProcessMaker.EventBus.$on(
       container: true,
       config: {
         initiallyOpen: false,
-        label: 'Notifications',
+        label: i18next.t('Notifications'),
         icon: 'bell',
         name: 'notifications-accordion',
       },
@@ -295,10 +320,87 @@ ProcessMaker.EventBus.$on(
     registerInspectorExtension(intermediateMessageCatchEvent, {
       component: 'FormInput',
       config: {
-          label: 'Whitelist',
-          helper: 'IP/Domain whitelist',
+          label: i18next.t('Whitelist'),
+          helper: i18next.t('IP/Domain whitelist'),
           name: 'whitelist',
       },
     });
+
+    registerInspectorExtension(sequenceFlow, {
+      component: 'GatewayFlowVariable',
+      config: {
+        label: 'Screen for Input',
+        helper: 'Select Screen to display this Task',
+        name: 'FlowVariable',
+      }
+    });
+
+    registerInspectorExtension(callActivity, {
+      component: 'FormAccordion',
+      container: true,
+      config: {
+        initiallyOpen: false,
+        label: i18next.t('Assignment Rules'),
+        icon: 'users',
+        name: 'assignments-accordion',
+      },
+      items: [
+        {
+          component: 'TaskAssignment',
+          config: {
+            label: 'Start Sub Process As',
+            helper: '',
+            name: 'taskAssignment',
+            configurables: [],
+            assignmentTypes: [
+              {
+                value: '',
+                label: ''
+              },
+              {
+                value: '',
+                label: 'Anonymous'
+              },
+              {
+                value: 'requester',
+                label: 'Requester'
+              },
+              {
+                value: 'user_group',
+                label: 'Users / Groups'
+              },
+              {
+                value: 'previous_task_assignee',
+                label: 'Previous Task Assignee'
+              },
+              {
+                value: 'user_by_id',
+                label: 'By User ID'
+              }
+            ]
+          }
+        },
+      ],
+    });
+
+    registerInspectorExtension(intermediateSignalThrowEvent, {
+      component: "SignalPayload",
+      config: {
+        label: "Payload Type",
+        helper: "data that will be sent as payload",
+        name: "interstitial"
+      }
+    });
+
+    registerInspectorExtension(signalEndEvent, {
+      component: "SignalPayload",
+      config: {
+        label: "Payload Type",
+        helper: "data that will be sent as payload",
+        name: "interstitial"
+      }
+    });
   }
 );
+
+validateScreenRef();

@@ -56,7 +56,7 @@
 
         mounted() {
             ProcessMaker.EventBus.$on('api-client-loading', (request) => {
-                if (this.for && this.for.test(request.url)) {
+                if (this.for && this.for.test(request.url) && request.method.toLowerCase() === 'get') {
                     this.dataLoading = true
                     this.error = false
                     this.noResults = false
@@ -71,8 +71,12 @@
                 }
             })
             ProcessMaker.EventBus.$on('api-client-error', (error) => {
-                this.noResults = false
-                this.error = true
+                if (error && error.response.data.error == 'Not Found') {
+                    this.noResults = true;
+                } else {
+                    this.noResults = false
+                    this.error = true
+                }
             })
         },
         methods: {

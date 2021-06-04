@@ -1,10 +1,11 @@
 import "bootstrap-vue/dist/bootstrap-vue.css";
 import BootstrapVue from "bootstrap-vue";
 import Echo from "laravel-echo";
-import VueRouter from "vue-router";
+import Router from "vue-router";
 import datetime_format from "../js/data/datetime_formats.json"
 import translator from "./modules/lang.js"
 import ScreenBuilder from '@processmaker/screen-builder';
+import * as VueDeepSet from "vue-deepset";
 
 window.__ = translator;
 window._ = require("lodash");
@@ -14,6 +15,11 @@ window.Popper = require("popper.js").default;
  * Give node plugins access to our custom screen builder components
  */
 window.ProcessmakerComponents = require("../js/processes/screen-builder/components")
+
+/**
+ * Give node plugins access to additional components
+ */
+window.SharedComponents = require("../js/components/shared");
 
 /**
  * We'll load jQuery and the Bootstrap jQuery plugin which provides support
@@ -30,10 +36,16 @@ window.$ = window.jQuery = require("jquery");
  */
 
 window.Vue = require("vue");
-
 window.Vue.use(BootstrapVue);
-window.Vue.use(VueRouter);
 window.Vue.use(ScreenBuilder);
+window.Vue.use(VueDeepSet);
+if (!document.head.querySelector("meta[name=\"is-horizon\"]")) {
+    window.Vue.use(Router);
+}
+window.VueMonaco = require("vue-monaco");
+window.ScreenBuilder = require('@processmaker/screen-builder');
+
+window.VueRouter = Router;
 
 /**
  * Setup Translations
@@ -45,6 +57,7 @@ import XHR from 'i18next-xhr-backend';
 import VueI18Next from '@panter/vue-i18next';
 import {install as VuetableInstall} from 'vuetable-2';
 import Pagination from "./components/common/Pagination";
+import ScreenSelect from "./processes/modeler/components/inspector/ScreenSelect.vue";
 import MonacoEditor from "vue-monaco";
 import RequestChannel from './tasks/components/ProcessRequestChannel';
 
@@ -52,40 +65,28 @@ window.Vue.use(VueI18Next);
 VuetableInstall(window.Vue);
 window.Vue.component('pagination', Pagination);
 window.Vue.component('monaco-editor', MonacoEditor);
+window.Vue.component('screen-select', ScreenSelect);
 let translationsLoaded = false
 let mdates = JSON.parse(
     document.head.querySelector("meta[name=\"i18n-mdate\"]").content
 )
-i18next.use(Backend).init({
-    lng: document.documentElement.lang,
-    keySeparator: false,
-    parseMissingKeyHandler(value) {
-        if (!translationsLoaded) { return value }
-        // Report that a translation is missing
-        window.ProcessMaker.missingTranslation(value)
-        // Fallback to showing the english version
-        return value
-    },
-    backend: {
-        backends: [
-            LocalStorageBackend, // Try cache first
-            XHR,
-        ],
-        backendOptions: [
-            { versions: mdates },
-            { loadPath: '/i18next/fetch/{{lng}}/_default' },
-        ],
-    }
-}).then(() => { translationsLoaded = true })
+
 // Make $t available to all vue instances
 Vue.mixin({ i18n: new VueI18Next(i18next) })
 
 window.ProcessMaker = {
+    i18n: i18next,
 
     /**
      * A general use global event bus that can be used
      */
     EventBus: new Vue(),
+    /**
+     * A general use global router that can be used
+     */
+    Router: new Router({
+      mode: 'history'
+    }),
     /**
      * ProcessMaker Notifications
      */
@@ -145,7 +146,36 @@ window.ProcessMaker = {
     },
 
     RequestChannel,
+
+    $notifications: {
+        icons: {},
+    },
 };
+
+
+window.ProcessMaker.i18nPromise = i18next.use(Backend).init({
+    lng: document.documentElement.lang,
+    keySeparator: false,
+    parseMissingKeyHandler(value) {
+        if (!translationsLoaded) { return value }
+        // Report that a translation is missing
+        window.ProcessMaker.missingTranslation(value)
+        // Fallback to showing the english version
+        return value
+    },
+    backend: {
+        backends: [
+            LocalStorageBackend, // Try cache first
+            XHR,
+        ],
+        backendOptions: [
+            { versions: mdates },
+            { loadPath: '/i18next/fetch/{{lng}}/_default' },
+        ],
+    }
+})
+
+window.ProcessMaker.i18nPromise.then(() => { translationsLoaded = true })
 
 /**
  * Create a axios instance which any vue component can bring in to call
@@ -171,8 +201,13 @@ if (token) {
 }
 
 window.ProcessMaker.apiClient.defaults.baseURL = "/api/1.0/";
-// Default to a 5 second timeout, which is an eternity in web app terms
-window.ProcessMaker.apiClient.defaults.timeout = 5000;
+
+// Set the default API timeout
+let apiTimeout = 5000;
+if (window.Processmaker && window.Processmaker.apiTimeout !== undefined) {
+    apiTimeout = window.Processmaker.apiTimeout;
+}
+window.ProcessMaker.apiClient.defaults.timeout = apiTimeout;
 
 // Default alert functionality
 window.ProcessMaker.alert = function (text, variant) {
@@ -225,7 +260,7 @@ if (userID) {
             );
         }
         if (e.data.method === 'timedOut') {
-            window.location = '/logout';
+            window.location = '/logout?timeout=true';
         }
     });
 
@@ -255,3 +290,34 @@ if (userID) {
             window.ProcessMaker.closeSessionModal();
         });
 }
+
+const clickTab = () => {
+    const hash = window.location.hash;
+    if (!hash) {
+        return;
+    }
+    const tab = $('[role="tab"][href="'+ hash + '"]');
+    if (tab.length) {
+        tab.tab('show');
+    }
+};
+window.addEventListener("hashchange", clickTab);
+
+// click an active tab after all components have mounted
+Vue.use({
+    install(vue) {
+        vue.mixin({
+            mounted() {
+                if (this.$parent) {
+                    // only run on root
+                    return;
+                }
+
+                // Run after component mounted
+                this.$nextTick(() => {
+                    clickTab();
+                });
+            },
+        })
+    }
+});

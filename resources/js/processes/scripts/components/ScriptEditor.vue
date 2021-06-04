@@ -3,9 +3,9 @@
     <b-card no-body class="h-100">
       <top-menu ref="menuScript" :options="optionsMenu"/>
 
-      <b-card-body class="overflow-hidden p-4">
+      <b-card-body class="overflow-hidden p-4" ref="editorContainer">
         <b-row class="h-100">
-          <b-col cols="9" class="h-100">
+          <b-col cols="9" class="h-100 p-0">
             <monaco-editor
               :options="monacoOptions"
               v-model="code"
@@ -54,7 +54,6 @@
                         v-model="preview.config"
                         language="json"
                         class="editor-inspector"
-                        :class="{hidden: resizing}"
                       />
                     </b-collapse>
                   </b-list-group-item>
@@ -77,7 +76,6 @@
                         v-model="preview.data"
                         language="json"
                         class="editor-inspector"
-                        :class="{hidden: resizing}"
                       />
                     </b-collapse>
                   </b-list-group-item>
@@ -176,6 +174,7 @@ export default {
       outputOpen: true,
       optionsMenu: options,
       boilerPlateTemplate: this.$t(` \r Welcome to ProcessMaker 4 Script Editor \r To access Environment Variables use {accessEnvVar} \r To access Request Data use {dataVariable} \r To access Configuration Data use {configVariable} \r To preview your script, click the Run button using the provided input and config data \r Return an array and it will be merged with the processes data \r Example API to retrieve user email by their ID {apiExample} \r API Documentation {apiDocsUrl} \r `),
+      nonce: null,
     };
   },
   watch: {
@@ -205,16 +204,26 @@ export default {
     window.Echo.private(
       `ProcessMaker.Models.User.${userID.content}`
     ).notification(response => {
+      console.log(response);
       this.outputResponse(response);
     });
-    this.loadBoilerplateTemplate();
+    this.loadBoilerplateTemplate();    
   },
   beforeDestroy: function() {
     window.removeEventListener("resize", this.handleResize);
   },
 
   methods: {
+    resizeEditor() {
+      const domNode = this.editorReference.getDomNode();
+      const clientHeight =  this.$refs.editorContainer.clientHeight;
+      domNode.style.height = clientHeight.toString() + 'px';
+    },
     outputResponse(response) {
+      if (response.nonce !== this.nonce) {
+        return;
+      }
+
       if (this.executionKey && this.executionKey !== response.data.watcher) {
         return;
       }
@@ -240,6 +249,7 @@ export default {
     },
     stopResizing: _.debounce(function() {
       this.resizing = false;
+      //this.resizeEditor();
     }, 50),
     handleResize() {
       this.resizing = true;
@@ -251,11 +261,13 @@ export default {
       this.preview.failure = false;
       this.preview.output = undefined;
       // Attempt to execute a script, using our temp variables
+      this.nonce = Math.random().toString(36);
       ProcessMaker.apiClient.post("scripts/" + this.script.id + "/preview", {
         code: this.code,
         data: this.preview.data,
         config: this.preview.config,
-        timeout: this.script.timeout
+        timeout: this.script.timeout,
+        nonce: this.nonce,
       }).then((response) => {
         this.executionKey = response.data.key;
       });

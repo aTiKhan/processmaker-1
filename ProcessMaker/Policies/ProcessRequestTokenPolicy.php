@@ -4,7 +4,10 @@ namespace ProcessMaker\Policies;
 
 use ProcessMaker\Models\User;
 use ProcessMaker\Models\ProcessRequestToken;
+use ProcessMaker\Models\Screen;
 use Illuminate\Auth\Access\HandlesAuthorization;
+use ProcessMaker\Models\AnonymousUser;
+use Illuminate\Support\Facades\Request;
 
 class ProcessRequestTokenPolicy
 {
@@ -50,12 +53,37 @@ class ProcessRequestTokenPolicy
      */
     public function update(User $user, ProcessRequestToken $processRequestToken)
     {
-        if ($processRequestToken->user_id == $user->id) {
+        if (
+            $processRequestToken->user_id === $user->id || 
+            $processRequestToken->user_id === app(AnonymousUser::class)->id
+        ) {
             return true;
         }
         if ($user->canSelfServe($processRequestToken)) {
             return true;
         }
-    }    
+    }
+
+    /**
+     * Determine if the user can view a screen associated with the task
+     *
+     * @param  \ProcessMaker\Models\User  $user
+     * @param  \ProcessMaker\Models\ProcessRequestToken  $processRequestToken
+     * @param  \ProcessMaker\Models\Screen  $screen
+     * @return mixed
+     */
+    public function viewScreen(User $user, ProcessRequestToken $task, Screen $screen)
+    {
+        if (!$user->can('update', $task)) {
+            return false;
+        }
+
+        $screenIds = $task->getScreenAndNestedIds();
+        if (!in_array($screen->id, $screenIds)) {
+            return false;
+        }
+
+        return true;
+    }
     
 }

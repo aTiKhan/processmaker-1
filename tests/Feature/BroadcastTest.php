@@ -20,8 +20,10 @@ use ProcessMaker\Managers\ScreenBuilderManager as ScreenBuilder;
 use ProcessMaker\Managers\ModelerManager as Modeler;
 use ProcessMaker\Managers\ScriptBuilderManager as ScriptBuilder;
 use Illuminate\Foundation\Testing\WithFaker;
-
-
+use ProcessMaker\Events\ImportedScreenSaved;
+use ProcessMaker\Events\TestStatusEvent;
+use ProcessMaker\Managers\ScreenBuilderManager;
+use ProcessMaker\Models\Screen;
 
 class BroadcastTest extends TestCase
 {
@@ -92,7 +94,7 @@ class BroadcastTest extends TestCase
         ]);
         event(new ProcessCompleted($request));
         $this->assertLogContainsText('ProcessCompleted');
-        $this->assertLogContainsText(addcslashes(route('api.requests.show', ['task' => $request->id]), '/'));
+        $this->assertLogContainsText(addcslashes(route('api.requests.show', [$request->id]), '/'));
         $this->assertBroadcastEventSizeLessThan('ProcessCompleted', 10000);
     }
 
@@ -110,7 +112,7 @@ class BroadcastTest extends TestCase
         ]);
         event(new ProcessUpdated($request, 'ACTIVITY_COMPLETED'));
         $this->assertLogContainsText('ProcessUpdated');
-        $this->assertLogContainsText(addcslashes(route('api.requests.show', ['task' => $request->id]), '/'));
+        $this->assertLogContainsText(addcslashes(route('api.requests.show', [$request->id]), '/'));
         $this->assertBroadcastEventSizeLessThan('ProcessUpdated', 10000);
     }
 
@@ -122,7 +124,9 @@ class BroadcastTest extends TestCase
      */
     public function testScreenBuilderStartingBroadcast()
     {
-        $this->markTestSkipped('Will implement later');
+        $this->expectsEvents([
+            ScreenBuilderStarting::class,
+        ]);
         $manager = new ScreenBuilder();
         event(new ScreenBuilderStarting($manager, 'DISPLAY'));
     }
@@ -134,7 +138,9 @@ class BroadcastTest extends TestCase
      */
     public function testModelerStartingBroadcast()
     {
-        $this->markTestSkipped('Will implement later');
+        $this->expectsEvents([
+            ModelerStarting::class,
+        ]);
         $manager = new Modeler();
         event(new ModelerStarting($manager));
     }
@@ -175,8 +181,39 @@ class BroadcastTest extends TestCase
      */
     public function testScriptBuilderStartingBroadcast()
     {
-        $this->markTestSkipped('Will implement later');
-        $manager = new ScriptBuilder();
-        event(new ScreenBuilderStarting($manager));
+        $this->expectsEvents([
+            ScreenBuilderStarting::class,
+        ]);
+        $manager = new ScreenBuilderManager();
+        $type = 'FORM';
+        event(new ScreenBuilderStarting($manager, $type));
+    }
+
+    /**
+     * Asserts that the BuildScriptExecutor event works.
+     *
+     * @return void
+     */
+    public function testImportedScreenSavedBroadcast()
+    {
+        $this->expectsEvents([
+            ImportedScreenSaved::class,
+        ]);
+        $screen = factory(Screen::class)->create();
+        event(new ImportedScreenSaved($screen->id, $screen->toArray()));
+    }
+
+
+    /**
+     * Asserts that the TestStatusEvent event works.
+     *
+     * @return void
+     */
+    public function testTestStatusEventBroadcast()
+    {
+        $this->expectsEvents([
+            TestStatusEvent::class,
+        ]);
+        event(new TestStatusEvent('test', 'test status event'));
     }
 }

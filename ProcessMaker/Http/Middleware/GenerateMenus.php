@@ -5,6 +5,7 @@ namespace ProcessMaker\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Lavary\Menu\Facade as Menu;
+use ProcessMaker\Models\Setting;
 
 class GenerateMenus
 {
@@ -31,7 +32,7 @@ class GenerateMenus
                     $request_items->add(__('Designer'), ['route' => 'processes.index'])->active('processes/*');
                 });
             }
-            if (\Auth::check() && \Auth::user()->canAny('view-users|view-groups|view-auth_clients')) {
+            if (\Auth::check() && \Auth::user()->canAny('view-users|view-groups|view-auth_clients|view-settings')) {
                 $menu->group(['prefix' => 'admin'], function ($admin_items) {
                     $admin_items->add(__('Admin'), ['route' => 'admin.index'])->active('admin/*');
                 });
@@ -55,6 +56,13 @@ class GenerateMenus
                     'id' => 'homeid'
                 ]);
             }
+            if (\Auth::check() && \Auth::user()->can('view-settings') && Setting::notHidden()->count()) {
+                $submenu->add(__('Settings'), [
+                    'route' => 'settings.index',
+                    'icon' => 'fa-sliders-h',
+                    'id' => 'homeid'
+                ]);
+            }
             if (\Auth::check() && \Auth::user()->can('view-auth_clients')) {
                 $submenu->add(__('Auth Clients'), [
                     'route' => 'auth-clients.index',
@@ -74,7 +82,7 @@ class GenerateMenus
                     'icon' => 'fa-infinity',
                 ]);
             }
-            
+
             if (\Auth::check() && \Auth::user()->is_administrator) {
                 $submenu->add(__('Script Executors'), [
                     'route' => 'script-executors.index',
@@ -150,6 +158,13 @@ class GenerateMenus
                     'route' => 'environment-variables.index',
                     'icon' => 'fa-lock',
                     'id' => 'process-environment'
+                ]);
+            }
+            if (\Auth::check() && \Auth::user()->can('edit-processes')) {
+                $submenu->add(__('Signals'), [
+                    'route' => 'signals.index',
+                    'customicon' => 'nav-icon fas bpmn-icon-end-event-signal',
+                    'id' => 'signal'
                 ]);
             }
         });

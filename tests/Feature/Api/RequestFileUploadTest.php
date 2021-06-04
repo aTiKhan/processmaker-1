@@ -10,10 +10,12 @@ use ProcessMaker\Nayra\Storage\BpmnDocument;
 use Tests\Feature\Shared\RequestHelper;
 use Tests\TestCase;
 use ProcessMaker\Providers\WorkflowServiceProvider;
+use Tests\Feature\Api\TestProcessExecutionTrait;
 
 class RequestFileUploadTest extends TestCase
 {
     use RequestHelper;
+    use TestProcessExecutionTrait;
 
     /**
      * @var Process $process
@@ -58,7 +60,8 @@ class RequestFileUploadTest extends TestCase
         $route = route('api.requests.files.store', [$request->id, 'event' => 'node_1']);
         $response = $this->actingAs($uploadTask->user, 'api')
             ->json('POST', $route, [
-                'file' => File::image('photo.jpg')
+                'file' => File::image('photo.jpg'),
+                'data_name' => 'photo'
             ]);
         // Check the user has access to upload a file
         $response->assertStatus(200);
@@ -106,36 +109,5 @@ class RequestFileUploadTest extends TestCase
         $response->assertStatus(403);
         // Check the file was not uploaded
         $this->assertEquals(0, $request->getMedia()->count());
-    }
-
-    /**
-     * Create new task assignment type user successfully
-     */
-    private function loadTestProcess($bpmn, array $users = [])
-    {
-        // Create a new process
-        $this->process = factory(Process::class)->create([
-            'bpmn' => $bpmn,
-        ]);
-
-        $definitions = $this->process->getDefinitions();
-        foreach ($definitions->getElementsByTagNameNS(BpmnDocument::BPMN_MODEL, 'task') as $task) {
-            if ($task->getAttributeNS(WorkflowServiceProvider::PROCESS_MAKER_NS, 'assignment') === 'user') {
-                $userId = $task->getAttributeNS(WorkflowServiceProvider::PROCESS_MAKER_NS, 'assignedUsers');
-                if (isset($users[$userId])) {
-                    $task->setAttributeNS(WorkflowServiceProvider::PROCESS_MAKER_NS, 'assignedUsers', $users[$userId]->id);
-                } elseif (!User::find($userId)) {
-                    $users[$userId] = factory(User::class)->create([
-                        'id' => $userId,
-                        'status' => 'ACTIVE',
-                    ]);
-                    $users[$userId] =
-                    $task->setAttributeNS(WorkflowServiceProvider::PROCESS_MAKER_NS, 'assignedUsers', $users[$userId]->id);
-                }
-            }
-        }
-        $this->process->bpmn = $definitions->saveXml();
-        // When save the process creates the assignments
-        $this->process->save();
     }
 }

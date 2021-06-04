@@ -5,6 +5,8 @@ namespace ProcessMaker\Providers;
 use Blade;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 use Illuminate\Support\Facades\Validator;
+use ProcessMaker\Managers\IndexManager;
+use ProcessMaker\Managers\LoginManager;
 use ProcessMaker\Managers\ModelerManager;
 use ProcessMaker\Managers\PackageManager;
 use ProcessMaker\Managers\ScreenBuilderManager;
@@ -14,16 +16,20 @@ use Laravel\Horizon\Horizon;
 use Laravel\Passport\Passport;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
+use ProcessMaker\Models\AnonymousUser;
 use ProcessMaker\Models\Process;
 use ProcessMaker\Models\ProcessCollaboration;
 use ProcessMaker\Models\ProcessRequest;
+use ProcessMaker\Models\Setting;
 use ProcessMaker\Models\User;
 use ProcessMaker\Observers\ProcessCollaborationObserver;
 use ProcessMaker\Observers\ProcessObserver;
 use ProcessMaker\Observers\ProcessRequestObserver;
+use ProcessMaker\Observers\SettingObserver;
 use ProcessMaker\Observers\UserObserver;
 use ProcessMaker\Models\ProcessRequestToken;
 use ProcessMaker\Observers\ProcessRequestTokenObserver;
+use ProcessMaker\PolicyExtension;
 
 /**
  * Provide our ProcessMaker specific services
@@ -40,6 +46,7 @@ class ProcessMakerServiceProvider extends ServiceProvider
     public function boot()
     {
         User::observe(UserObserver::class);
+        Setting::observe(SettingObserver::class);
         Process::observe(ProcessObserver::class);
         ProcessRequest::observe(ProcessRequestObserver::class);
         ProcessRequestToken::observe(ProcessRequestTokenObserver::class);
@@ -54,7 +61,6 @@ class ProcessMakerServiceProvider extends ServiceProvider
         Validator::extend('alpha_spaces', function ($attr, $val) {
             return preg_match('/^[\pL\s\-\_\d\.\']+$/u', $val);
         });
-
 
         parent::boot();
     }
@@ -72,6 +78,20 @@ class ProcessMakerServiceProvider extends ServiceProvider
         $this->app->singleton(PackageManager::class, function () {
             return new PackageManager();
         });
+        
+        $this->app->singleton(LoginManager::class, function () {
+            return new LoginManager();
+        });
+
+        /**
+         * Maps our Index Manager as a singleton. The Index Manager is used
+         * to manage customizations to the search indexer.
+         */
+        $this->app->singleton(IndexManager::class, function () {
+            return new IndexManager();
+        });
+        $this->app->make(IndexManager::class)->add('Requests', \ProcessMaker\Models\ProcessRequest::class);
+        $this->app->make(IndexManager::class)->add('Tasks', \ProcessMaker\Models\ProcessRequestToken::class);
 
         /**
          * Maps our Modeler Manager as a singleton. The Modeler Manager is used
@@ -95,6 +115,18 @@ class ProcessMakerServiceProvider extends ServiceProvider
          */
         $this->app->singleton(ScriptBuilderManager::class, function($app) {
             return new ScriptBuilderManager();
+        });
+
+        $this->app->singleton(GlobalScriptsManager::class, function($app) {
+            return new GlobalScriptsManager();
+        });
+        
+        $this->app->singleton(AnonymousUser::class, function($app) {
+            return AnonymousUser::where('username', AnonymousUser::ANONYMOUS_USERNAME)->firstOrFail();
+        });
+        
+        $this->app->singleton(PolicyExtension::class, function($app) {
+            return new PolicyExtension();
         });
 
         // Listen to the events for our core screen types and add our javascript

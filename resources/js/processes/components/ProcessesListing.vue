@@ -38,7 +38,7 @@
                       variant="link"
                       @click="onAction('unpause-start-timer', props.rowData, props.rowIndex)"
                       v-b-tooltip.hover
-                      :title="$t('Play start timer events')"
+                      :title="$t('Unpause Start Timer Events')"
                       v-if="props.rowData.has_timer_start_events && props.rowData.pause_timer_start"
               >
                 <i class="fas fa-play fa-lg fa-fw"></i>
@@ -47,7 +47,7 @@
                       variant="link"
                       @click="onAction('pause-start-timer', props.rowData, props.rowIndex)"
                       v-b-tooltip.hover
-                      :title="$t('Pause start timer events')"
+                      :title="$t('Pause Start Timer Events')"
                       v-if="props.rowData.has_timer_start_events && !props.rowData.pause_timer_start"
               >
                 <i class="fas fa-pause fa-lg fa-fw"></i>
@@ -69,6 +69,15 @@
                       v-if="permission.includes('edit-processes') && props.rowData.status === 'ACTIVE'"
               >
                 <i class="fas fa-cog fa-lg fa-fw"></i>
+              </b-btn>
+              <b-btn
+                      variant="link"
+                      @click="onAction('view-documentation', props.rowData, props.rowIndex)"
+                      v-b-tooltip.hover
+                      :title="$t('View Documentation')"
+                      v-if="permission.includes('view-processes') && isDocumenterInstalled"
+              >
+                <i class="fas fa-map-signs fa-lg fa-fw"></i>
               </b-btn>
               <b-btn
                       variant="link"
@@ -120,7 +129,7 @@
 
   export default {
     mixins: [datatableMixin, dataLoadingMixin],
-    props: ["filter", "id", "status", "permission"],
+    props: ["filter", "id", "status", "permission", "isDocumenterInstalled"],
     data() {
       return {
         orderBy: "name",
@@ -180,6 +189,9 @@
       goToEdit(data) {
         window.location = "/processes/" + data + "/edit";
       },
+      goToDocumentation(processId) {
+        window.location = `/modeler/${processId}/print`;
+      },
       goToDesigner(data) {
         window.location = "/modeler/" + data;
       },
@@ -187,33 +199,30 @@
         window.location = "/processes/" + data + "/export";
       },
       onAction(action, data, index) {
-        let putData;
+        let putData = {
+          name: data.name,
+          description: data.description,
+        };
         switch (action) {
           case "unpause-start-timer":
-            putData = Object.assign({}, data);
             putData.pause_timer_start = false;
-            delete putData.category;
-            delete putData.user;
             ProcessMaker.apiClient
                 .put("processes/" + data.id, putData)
                 .then(response => {
                   ProcessMaker.alert(
-                      this.$t("The process was restored."),
+                      this.$t("The process was unpaused."),
                       "success"
                   );
                   this.$emit("reload");
                 });
             break;
           case "pause-start-timer":
-            putData = Object.assign({}, data);
             putData.pause_timer_start = true;
-            delete putData.category;
-            delete putData.user;
             ProcessMaker.apiClient
                 .put("processes/" + data.id, putData)
                 .then(response => {
                   ProcessMaker.alert(
-                      this.$t("The process was restored."),
+                      this.$t("The process was paused."),
                       "success"
                   );
                   this.$emit("reload");
@@ -224,6 +233,9 @@
             break;
           case "edit-item":
             this.goToEdit(data.id);
+            break;
+          case "view-documentation":
+            this.goToDocumentation(data.id);
             break;
           case "export-item":
             this.goToExport(data.id);
@@ -338,11 +350,11 @@
 </script>
 
 <style lang="scss" scoped>
-  /deep/ th#_updated_at {
+  >>> th#_updated_at {
     width: 14%;
   }
 
-  /deep/ th#_created_at {
+  >>> th#_created_at {
     width: 14%;
   }
 </style>

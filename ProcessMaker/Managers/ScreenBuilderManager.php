@@ -27,7 +27,9 @@ class ScreenBuilderManager
      */
     public function addScript($script)
     {
-        $this->javascriptRegistry[] = $script;
+        if (!in_array($script, $this->javascriptRegistry)) {
+            $this->javascriptRegistry[] = $script;
+        }
     }
 
     /**
@@ -38,7 +40,13 @@ class ScreenBuilderManager
      */
     public function getScripts()
     {
-        return $this->javascriptRegistry;
+        $scripts = [];
+        foreach($this->javascriptRegistry as $script) {
+            $path = public_path($script);
+            $time = file_exists($path) ? filemtime($path) : 0;
+            $scripts[] = $script . ($time ? "?t=$time" : '');
+        }
+        return $scripts;
     }
 
     public function addPackageScripts($type = 'DISPLAY')

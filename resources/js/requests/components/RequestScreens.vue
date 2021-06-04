@@ -78,12 +78,12 @@
 
         fields: [
           {
-            title: this.$t("Screen"),
+            title: () => this.$t("Screen"),
             name: "title",
             field: "title",
           },
           {
-            title: this.$t("Description"),
+            title: () => this.$t("Description"),
             name: "description",
           },
           {
@@ -96,7 +96,7 @@
 
     methods: {
       preview(data) {
-        window.open('/requests/' + this.id + '/screen/' + data.screen_id);
+        window.open('/requests/' + this.id + '/task/' + data.id + '/screen/' + data.screen_id);
       },
       previewScreen(data) {
         data.view = !data.view;

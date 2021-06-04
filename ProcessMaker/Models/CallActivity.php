@@ -2,6 +2,7 @@
 
 namespace ProcessMaker\Models;
 
+use Exception;
 use ProcessMaker\Nayra\Bpmn\ActivitySubProcessTrait;
 use ProcessMaker\Nayra\Bpmn\Events\ActivityActivatedEvent;
 use ProcessMaker\Nayra\Bpmn\Events\ActivityClosedEvent;
@@ -9,9 +10,10 @@ use ProcessMaker\Nayra\Bpmn\Events\ActivityCompletedEvent;
 use ProcessMaker\Nayra\Contracts\Bpmn\ActivityInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\CallActivityInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\ErrorInterface;
-use ProcessMaker\Nayra\Contracts\Bpmn\FlowInterface;
 use ProcessMaker\Nayra\Contracts\Bpmn\TokenInterface;
 use ProcessMaker\Nayra\Contracts\Engine\ExecutionInstanceInterface;
+use ProcessMaker\Jobs\CopyRequestFiles;
+use ProcessMaker\Managers\DataManager;
 
 /**
  * Call Activity model
@@ -34,11 +36,13 @@ class CallActivity implements CallActivityInterface
     {
         $this->attachEvent(
             ActivityInterface::EVENT_ACTIVITY_ACTIVATED,
-            function ($self, TokenInterface $token, FlowInterface $sequenceFlow) {
-                $instance = $this->callSubprocess($token, $sequenceFlow);
+            function (ActivityInterface $callActivity, TokenInterface $token) {
+                $config = json_decode($callActivity->getProperty('config'), true);
+                $startId = is_array($config) && isset($config['startEvent']) ? $config['startEvent'] : null;
+                $instance = $this->callSubprocess($token, $startId);
                 $this->getRepository()
                     ->getTokenRepository()
-                    ->persistCallActivityActivated($token, $instance, $sequenceFlow);
+                    ->persistCallActivityActivated($token, $instance, $startId);
                 $this->linkProcesses($token, $instance);
                 $this->syncronizeInstances($token->getInstance(), $instance);
             }
@@ -50,14 +54,13 @@ class CallActivity implements CallActivityInterface
      *
      * @return ExecutionInstanceInterface
      */
-    protected function callSubprocess(TokenInterface $token, FlowInterface $sequenceFlow)
+    protected function callSubprocess(TokenInterface $token, $startId)
     {
         $callable = $this->getCalledElement();
-        // Capability to specify the target start event on the sequence flow to the call activity.
-        $startId = $sequenceFlow->getProperty('startEvent');
         $dataStore = $callable->getRepository()->createDataStore();
         // The entire data model is sent to the target
-        $data = $token->getInstance()->getDataStore()->getData();
+        $dataManager = new DataManager();
+        $data = $dataManager->getData($token);
 
         // Add info about parent
         $data['_parent'] = [
@@ -70,15 +73,15 @@ class CallActivity implements CallActivityInterface
         if ($configString) {
             $config = json_decode($configString, true);
             $data['_parent']['config'] = $config;
-            if (isset($config['startEvent'])) {
-                $startId = $config['startEvent'];
-            }
         }
 
         $startEvent = $startId ? $callable->getOwnerDocument()->getElementInstanceById($startId) : null;
 
         $dataStore->setData($data);
         $instance = $callable->call($dataStore, $startEvent);
+
+        CopyRequestFiles::dispatch($token->getInstance(), $instance);
+
         return $instance;
     }
 
@@ -93,14 +96,18 @@ class CallActivity implements CallActivityInterface
      */
     protected function completeSubprocess(TokenInterface $token, ExecutionInstanceInterface $closedInstance, ExecutionInstanceInterface $instance)
     {
-        $this->completeSubprocessBase($token);
         // Copy data from subprocess to main process
-        $dataStore = $token->getInstance()->getDataStore();
         $data = $closedInstance->getDataStore()->getData();
-        foreach ($data as $key => $value) {
-            $dataStore->putData($key, $value);
-        }
+        $dataManager = new DataManager();
+        $dataManager->updateData($token, $data);
+        $token->getInstance()->getProcess()->getEngine()->runToNextState();
+
+        // Complete the sub process call
+        $this->completeSubprocessBase($token);
         $this->syncronizeInstances($instance, $token->getInstance());
+
+        CopyRequestFiles::dispatch($instance, $token->getInstance());
+        
         return $this;
     }
 
@@ -116,6 +123,23 @@ class CallActivity implements CallActivityInterface
     protected function catchSubprocessError(TokenInterface $token, ErrorInterface $error = null, ExecutionInstanceInterface $instance)
     {
         $this->catchSubprocessErrorBase($token, $error);
+        // Log subprocess error message
+        $message = [];
+        if ($error) {
+            $message = [$error->getName()];
+        }
+        if ($instance->errors && is_array($instance->errors)) {
+            foreach($instance->errors as $err) {
+                $errorMessage = $err['message'];
+                if (array_key_exists('body', $err)) {
+                    // add the body but not the stack trace:
+                    $errorMessage = "\n" . explode('Stack trace', $err['body'])[0];
+                }
+                $message[] = $errorMessage;
+            }
+        }
+        $token->getInstance()->logError(new Exception(implode("\n", $message)), $this);
+
         $this->syncronizeInstances($instance, $token->getInstance());
         return $this;
     }
@@ -147,7 +171,7 @@ class CallActivity implements CallActivityInterface
             return $this->getOwnerDocument()->getElementInstanceById($calledElementRef);
         } elseif (count($refs) === 2) {
             // Capability to reuse other processes inside a process
-            $process = Process::findOrFail($refs[1]);
+            $process = is_numeric($refs[1]) ? Process::findOrFail($refs[1]) : Process::where('package_key', $refs[1])->firstOrFail();
             $engine = $this->getProcess()->getEngine();
             $definitions = $engine->getDefinition($process->getLatestVersion());
             $response = $definitions->getElementInstanceById($refs[0]);
@@ -196,5 +220,27 @@ class CallActivity implements CallActivityInterface
         if ($instance->process->id !== $currentInstance->process->id) {
             $currentInstance->getProcess()->getEngine()->runToNextState();
         }
+    }
+
+    /**
+     * Returns true if callable element is external to the owner definition
+     *
+     * @return boolean
+     */
+    public function isFromExternalDefinition()
+    {
+        $ref = explode('-', $this->getProperty(CallActivityInterface::BPMN_PROPERTY_CALLED_ELEMENT));
+        return count($ref) === 2 && is_numeric($ref[1]);
+    }
+
+    /**
+     * Returns true if callable element is a service sub process (like data-connector)
+     *
+     * @return boolean
+     */
+    public function isServiceSubProcess()
+    {
+        $ref = explode('-', $this->getProperty(CallActivityInterface::BPMN_PROPERTY_CALLED_ELEMENT));
+        return count($ref) === 2 && !is_numeric($ref[1]);
     }
 }

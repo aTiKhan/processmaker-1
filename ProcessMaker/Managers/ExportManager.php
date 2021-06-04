@@ -9,6 +9,8 @@ class ExportManager
 {
     private $dependencies = [];
 
+    private $logMessages = [];
+
     /**
      * Get the value of dependencies
      */
@@ -29,9 +31,9 @@ class ExportManager
         return $this;
     }
 
-    public function addDependencie(array $dependencie)
+    public function addDependency(array $dependency)
     {
-        $this->dependencies[] = $dependencie;
+        $this->dependencies[] = $dependency;
     }
 
     /**
@@ -73,7 +75,8 @@ class ExportManager
         $newReferences = [];
         foreach ($this->dependencies as $dependencie) {
             if (is_a($owner, $dependencie['owner'])) {
-                $newReferences = call_user_func($dependencie['referencesToExport'], $owner, $newReferences);
+                $recursive = false; // We search nested dependencies below
+                $newReferences = call_user_func($dependencie['referencesToExport'], $owner, $newReferences, $this, $recursive);
             }
         }
         $newReferences = $this->uniqueDiff($newReferences, $references);
@@ -114,15 +117,20 @@ class ExportManager
     {
         foreach ($this->dependencies as $dependencie) {
             if (is_a($model, $dependencie['owner']) && isset($dependencie['updateReferences'])) {
-                call_user_func($dependencie['updateReferences'], $model, $newReferences);
+                call_user_func($dependencie['updateReferences'], $model, $newReferences, $this);
             }
         }
     }
 
-    public function addDependencieManager($class)
+    public function addDependencyManager($class)
     {
-        $instance = new $class;
-        $this->addDependencie([
+        if (is_string($class)) {
+            $instance  = new $class;
+        } else {
+            $instance = $class;
+        }
+
+        $this->addDependency([
             'type' => $instance->type,
             'owner' => $instance->owner,
             'referencesToExport' => [$instance, 'referencesToExport'],
@@ -147,5 +155,29 @@ class ExportManager
             }
         }
         return $result;
+    }
+
+    /**
+     * Add a log message about the import process
+     *
+     * @param string $key
+     * @param string $label
+     * @param bool $success
+     * @param string $message
+     * @return void
+     */
+    public function addLogMessage($key, $label, $success, $message)
+    {
+        $this->logMessages[$key] = \compact('label', 'success', 'message');
+    }
+
+    /**
+     * Get logs of the current import process
+     *
+     * @return array
+     */
+    public function getLogMessages()
+    {
+        return $this->logMessages;
     }
 }

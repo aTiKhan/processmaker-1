@@ -4,9 +4,12 @@ namespace ProcessMaker\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Route;
 use ProcessMaker\Events\ScreenBuilderStarting;
 use ProcessMaker\Http\Controllers\Controller;
+use ProcessMaker\Managers\DataManager;
 use ProcessMaker\Managers\ScreenBuilderManager;
+use ProcessMaker\Models\Comment;
 use ProcessMaker\Models\ProcessRequest;
 use ProcessMaker\Models\ProcessRequestToken;
 use ProcessMaker\Models\Screen;
@@ -15,12 +18,15 @@ use ProcessMaker\Models\Process;
 use Spatie\MediaLibrary\Models\Media;
 use Spatie\MediaLibrary\HasMedia\HasMedia;
 use Spatie\MediaLibrary\HasMedia\HasMediaTrait;
+use ProcessMaker\Traits\HasControllerAddons;
 use ProcessMaker\Traits\SearchAutocompleteTrait;
+use ProcessMaker\Package\PackageComments\PackageServiceProvider;
 
 class RequestController extends Controller
 {
     use HasMediaTrait;
     use SearchAutocompleteTrait;
+    use HasControllerAddons;
 
     /**
      * Get the list of requests.
@@ -33,17 +39,6 @@ class RequestController extends Controller
             $this->authorize('view-all_requests');
         }
 
-        //load counters
-        $query = ProcessRequest::query();
-        if (!Auth::user()->is_administrator && !Auth::user()->can('view-all_requests')) {
-            $query->startedMe(Auth::user()->id);
-        }
-
-        $allRequest = $this->calculate('allRequest');
-        $startedMe = $this->calculate('startedMe');
-        $inProgress = $this->calculate('inProgress');
-        $completed = $this->calculate('completed');
-
         $title = 'My Requests';
 
         $types = ['all'=>'All Requests','in_progress'=>'Requests In Progress','completed'=>'Completed Requests'];
@@ -55,37 +50,8 @@ class RequestController extends Controller
         $currentUser = Auth::user()->only(['id', 'username', 'fullname', 'firstname', 'lastname', 'avatar']);
 
         return view('requests.index', compact(
-            ['allRequest', 'startedMe', 'inProgress', 'completed', 'type','title', 'currentUser']
+            ['type','title', 'currentUser']
         ));
-    }
-    private function calculate($type)
-    {
-        $result = 0;
-        $query = ProcessRequest::query();
-        if (!Auth::user()->is_administrator && !Auth::user()->can('view-all_requests')) {
-            $query->startedMe(Auth::user()->id);
-        }
-
-        $hiddenProcessIds = Process::whereHas('category', function($q) {
-            $q->where('is_system', true);
-        })->pluck('id');
-        $query->whereNotIn('process_id', $hiddenProcessIds);
-
-        switch ($type) {
-            case 'allRequest':
-               $result = $query->count();
-               break;
-            case 'startedMe':
-                $result = ProcessRequest::startedMe(Auth::user()->id)->inProgress()->count();
-                break;
-            case 'inProgress':
-                $result =$query->inProgress()->count();
-                break;
-            case 'completed':
-                $result = $query->completed()->count();
-                break;
-        }
-        return $result;
     }
 
     /**
@@ -108,6 +74,7 @@ class RequestController extends Controller
                 if ($allowInterstitial && $request->user_id == Auth::id()) {
                     $active = $request->tokens()
                         ->where('user_id', Auth::id())
+                        ->where('element_type', 'task')
                         ->where('status', 'ACTIVE')
                         ->orderBy('id')->first();
                     return redirect(route('tasks.edit', ['task' => $active ? $active->getKey() : $startEvent->getKey()]));
@@ -115,7 +82,21 @@ class RequestController extends Controller
             }
         }
 
-        $this->authorize('view', $request);
+        $userHasCommentsForRequest = Comment::where('commentable_type', ProcessRequest::class)
+                ->where('commentable_id', $request->id)
+                ->where('body','like', '%@' . \Auth::user()->username . '%')
+                ->count() > 0;
+
+        $requestMedia = $request->media()->get()->pluck('id');
+        $userHasCommentsForMedia = Comment::where('commentable_type', \ProcessMaker\Models\Media::class)
+                ->whereIn('commentable_id', $requestMedia)
+                ->where('body','like', '%@' . \Auth::user()->username . '%')
+                ->count() > 0;
+
+        if (!$userHasCommentsForMedia && !$userHasCommentsForRequest) {
+            $this->authorize('view', $request);
+        }
+
         $request->participants;
         $request->user;
         $request->summary = $request->summary();
@@ -128,7 +109,7 @@ class RequestController extends Controller
         $request->request_detail_screen = Screen::find($request->process->request_detail_screen_id);
 
         $canCancel = Auth::user()->can('cancel', $request->process);
-        $canViewComments = Auth::user()->hasPermissionsFor('comments')->count() > 0;
+        $canViewComments = (Auth::user()->hasPermissionsFor('comments')->count() > 0) || class_exists(PackageServiceProvider::class);
         $canManuallyComplete = Auth::user()->is_administrator && $request->status === 'ERROR';
 
         $files = $request->getMedia();
@@ -136,15 +117,38 @@ class RequestController extends Controller
         $canPrintScreens = $this->canUserPrintScreen($request);
         $screenRequested = $canPrintScreens ? $request->getScreensRequested() : [];
 
-        $manager = new ScreenBuilderManager();
+        $manager = app(ScreenBuilderManager::class);
         event(new ScreenBuilderStarting($manager, ($request->summary_screen) ? $request->summary_screen->type : 'FORM'));
 
+        $addons = $this->getPluginAddons('edit', compact(['request']));
+
         return view('requests.show', compact(
-            'request', 'files', 'canCancel', 'canViewComments', 'canManuallyComplete', 'manager', 'canPrintScreens', 'screenRequested'
+            'request', 'files', 'canCancel', 'canViewComments', 'canManuallyComplete', 'manager', 'canPrintScreens', 'screenRequested', 'addons'
         ));
     }
 
-    public function screenPreview(ProcessRequest $request, ScreenVersion $screen)
+    /**
+     * Redirect to owner task of a subprocess
+     *
+     * @param ProcessRequest $request
+     *
+     * @return \Illuminate\Routing\Redirector|\Illuminate\Http\RedirectResponse
+     */
+    public function showOwner(ProcessRequest $request)
+    {
+        $ownerTask = $request->ownerTask;
+        if (!$ownerTask) {
+            return abort(404);
+        }
+        $interstitial = $ownerTask->getInterstitial();
+        if ($interstitial['allow_interstitial']) {
+            return redirect(route('tasks.edit', ['task' => $ownerTask->id]));
+        } else {
+            return redirect(route('requests.show', ['request' => $request->id]));
+        }
+    }
+
+    public function screenPreview(ProcessRequest $request, ProcessRequestToken $task, ScreenVersion $screen)
     {
         $this->authorize('view', $request);
         if (!$this->canUserPrintScreen($request)) {
@@ -152,9 +156,12 @@ class RequestController extends Controller
             return redirect('403');
         }
 
-        $manager = new ScreenBuilderManager();
+        $dataManager = new DataManager();
+        $data = $dataManager->getData($task);
+
+        $manager = app(ScreenBuilderManager::class);
         event(new ScreenBuilderStarting($manager, ($request->summary_screen) ? $request->summary_screen->type : 'FORM'));
-        return view('requests.preview', compact('request', 'screen', 'manager'));
+        return view('requests.preview', compact('request', 'screen', 'manager', 'data'));
     }
 
     /**
@@ -178,9 +185,12 @@ class RequestController extends Controller
         return false;
     }
 
-    public function downloadFiles(ProcessRequest $requestID, Media $fileID)
+    public function downloadFiles(ProcessRequest $request, Media $media)
     {
-        $requestID->getMedia();
-        return response()->download($fileID->getPath(), $fileID->file_name);
+        $ids = $request->getMedia()->pluck('id');
+        if (!$ids->contains($media->id)) {
+            abort(403);
+        }
+        return response()->download($media->getPath(), $media->file_name);
     }
 }
